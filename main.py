@@ -29,82 +29,114 @@ with open(CATALOG_PATH, "r", encoding="utf-8") as f:
 
 # Utility functions
 def clear_db(session):
-    """
-    Remove all nodes and relationships from the database.
-    """
     session.execute_write(lambda tx: tx.run("MATCH (n) DETACH DELETE n"))
 
+## Create
 def create_course(tx, course_code, course_name):
-    tx.run(
-        "MERGE (c:Course {code: $code}) "
-        "SET c.name = $name",
-        code=course_code, name=course_name
-    )
-
-
-def create_reqgroup(tx, group_type):
-    rg_uuid = str(uuid.uuid4())
-    tx.run(
-        "CREATE (rg:ReqGroup {type: $type, uuid: $uuid})",
-        type=group_type, uuid=rg_uuid
-    )
-    return rg_uuid  # return the UUID, not id(rg)
-
-
-def create_requires(tx, parent_uuid, rg_uuid):
-    """
-    Link a ReqGroup to its parent, which can be either a Course or a parent ReqGroup.
-    """
-    # parent_uuid can be a Course UUID or a ReqGroup UUID
+    course_uuid = str(uuid.uuid4())
     tx.run(
         """
-        MATCH (parent {uuid:$parent_uuid}), (rg:ReqGroup {uuid:$rg_uuid})
-        MERGE (parent)-[:REQUIRES]->(rg)
+        MERGE (c:Course {
+            name: $name,
+            uuid: $uuid,
+            code: $code
+        })
         """,
-        parent_uuid=parent_uuid,
-        rg_uuid=rg_uuid
+        name=course_name,
+        code=course_code,
+        uuid=course_uuid
     )
-
-def include_course(tx, rg_uuid, course_code):
-    tx.run(
-        "MATCH (rg:ReqGroup {uuid:$rg_uuid}), (c:Course {code:$course_code}) "
-        "MERGE (rg)-[:INCLUDES]->(c)",
-        rg_uuid=rg_uuid, course_code=course_code
-    )
-
-def include_reqgroup(tx, rg_uuid, child_rg_uuid):
-    tx.run(
-        "MATCH (rg:ReqGroup {uuid:$rg_uuid}), (child:ReqGroup {uuid:$child_uuid}) "
-        "MERGE (rg)-[:INCLUDES]->(child)",
-        rg_uuid=rg_uuid, child_uuid=child_rg_uuid
-    )
-
-def include_placement(tx, rg_uuid, placement_uuid):
-    tx.run(
-        "MATCH (rg:ReqGroup {uuid:$rg_uuid}), (p:Placement {uuid:$p_uuid}) "
-        "MERGE (rg)-[:INCLUDES]->(p)",
-        rg_uuid=rg_uuid, p_uuid=placement_uuid
-    )
+    return course_uuid
 
 def create_placement(tx, placement_name):
     placement_uuid = str(uuid.uuid4())
     tx.run(
-        "CREATE (p:Placement {name: $name, uuid: $uuid})",
-        name=placement_name, uuid=placement_uuid
+        """
+        CREATE (p:Placement {
+            name: $name,
+            uuid: $uuid
+        })
+        """,
+        name=placement_name,
+        uuid=placement_uuid
     )
     return placement_uuid
 
-# Recursive function to process requisites
-def process_course(tx, course):
-    # 1. create course node
-    course_uuid = create_course(tx, course["code"], course["name"])
+def create_reqgroup(tx, group_type):
+    reqgroup_uuid = str(uuid.uuid4())
+    tx.run(
+        """
+        CREATE (rg:ReqGroup {
+            name: $type,
+            uuid: $uuid,
+            type: $type
+        })
+        """,
+        type=group_type,
+        uuid=reqgroup_uuid
+    )
+    return reqgroup_uuid
 
-    # 2. process its requisites recursively
+def create_requires(tx, parent_uuid, child_uuid):
+    tx.run(
+        """
+        MATCH (parent {
+            uuid: $parent_uuid
+        })
+        MERGE (child {
+            uuid: $child_uuid
+        })
+        MERGE (parent)-[:REQUIRES]->(child)
+        """,
+        parent_uuid=parent_uuid,
+        child_uuid=child_uuid
+    )
+
+## Read
+def find_course_by_code(tx, code):
+    result = tx.run(
+        """
+        MATCH (node:Course {
+            code: $code
+        })
+        RETURN node
+        """,
+        code=code
+    )
+
+    record = result.single()
+    if record is None: return
+    node = record["node"]
+    return node
+
+def find_by_uuid(tx, node_uuid):
+    result = tx.run(
+        """
+        MATCH (node {
+            uuid: $uuid
+        })
+        RETURN node
+        """,
+        uuid=node_uuid
+    )
+
+    record = result.single()
+    if record is None: return
+    node = record["node"]
+    return node
+
+def process_course_requisites(tx, course):
+    # Find the course by its code to get its UUID
+    node = find_course_by_code(tx, code=course["code"])
+    if node == None:
+        print("[ERROR]: Could not find previously imported course.")
+        return  # Course not found (should not happen)
+    course_uuid = node["uuid"]
+    
+    # Process its requisites
     req = course.get("requisite", {"type": "NONE"})
     if req["type"] != "NONE":
         process_requisite(tx, req, parent_uuid=course_uuid)
-
-    return course_uuid
 
 # Recursive function to process requisites
 def process_requisite(tx, req, parent_uuid):
@@ -114,51 +146,55 @@ def process_requisite(tx, req, parent_uuid):
         return None
 
     elif t == "COURSE":
-        return {"type": "COURSE", "id": req["course"]}
+        course_code = req.get("course", None)
+        if course_code != None:
+            node = find_course_by_code(tx, course_code)
+            if node == None:
+                print(f"[WARN]: Could not find requisite course with course code '{course_code}'.")
+                return
+            create_requires(tx, parent_uuid, node["uuid"])
+        else:
+            print(f"[ERROR]: 'course' property was expected, but was not found")
 
     elif t == "PLACEMENT":
-        placement_name = req.get("placement", "UNKNOWN")
-        placement_uuid = create_placement(tx, placement_name)
-        return {"type": "PLACEMENT", "id": placement_uuid}
+        placement_name = req.get("placement", None)
+        if placement_name != None:
+            placement_uuid = create_placement(tx, placement_name)
+            create_requires(tx, parent_uuid, placement_uuid)
+        else:
+            print(f"[ERROR]: 'placement' property was expected, but was not found")
 
     elif t in ("AND", "OR"):
-        # create ReqGroup node
-        rg_uuid = create_reqgroup(tx, t)
+        requirements = req.get("requirements", None)
+        if requirements != None:
+            reqgroup_uuid = create_reqgroup(tx, t)
+            create_requires(tx, parent_uuid, reqgroup_uuid)
 
-        # link group to parent (could be Course or parent ReqGroup)
-        create_requires(tx, parent_uuid, rg_uuid)
-
-        # process children
-        for child in req.get("requirements", []):
-            child_result = process_requisite(tx, child, parent_uuid=rg_uuid)
-            if child_result is None:
-                continue
-
-            child_type = child_result["type"]
-            child_id = child_result["id"]
-
-            if child_type == "COURSE":
-                include_course(tx, rg_uuid, child_id)
-            elif child_type == "PLACEMENT":
-                include_placement(tx, rg_uuid, child_id)
-            elif child_type == "REQGROUP":
-                include_reqgroup(tx, rg_uuid, child_id)
-            else:
-                raise ValueError(f"Unknown child type: {child_type}")
-
-        return {"type": "REQGROUP", "id": rg_uuid}
+            for c in requirements:
+                process_requisite(tx, c, parent_uuid=reqgroup_uuid)
+        else:
+            print(f"[ERROR]: 'requirements' property was expected, but was not found")
 
     else:
-        raise ValueError(f"Unknown requisite type: {t}")
+        raise ValueError(f"Unknown requisite type: {t}, only NONE, COURSE, PLACEMENT, AND, OR are allowed.")
 
 def main():
     with driver.session() as session:
+        print("[INFO] Cleared DB.")
         clear_db(session)
 
+        print(f"[INFO] Creating {len(catalog)} course nodes.")
+        # First pass: Create all course nodes
         for course in catalog:
-            session.execute_write(process_course, course)
+            session.execute_write(create_course, course["code"], course["name"])
+        
+        print("[INFO] Creating requisites relationships.")
+        # Second pass: Process requisites
+        for course in catalog:
+            session.execute_write(process_course_requisites, course)
+    
+    print("[INFO] Catalog loaded into Neo4j.")
 
-    print("[INFO] Catalog loaded into Neo4j successfully.")
 
 if __name__ == "__main__":
     main()
