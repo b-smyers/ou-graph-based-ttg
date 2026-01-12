@@ -1,17 +1,20 @@
+# load.py: Clears the database before loading the data from the provided <catalog-path> into the database
+
 from dotenv import load_dotenv
 load_dotenv()
 import os
+import sys
 from neo4j import GraphDatabase
 import uuid
 import json
 
 # Config
-CATALOG_PATH = os.getenv("CATALOG_PATH")
+CATALOG_PATH = sys.argv[1] if len(sys.argv) >= 2 else None
 URI = os.getenv("NEO4J_DB_URI")
 AUTH = (os.getenv("NEO4J_USERNAME"), os.getenv("NEO4J_PASSWORD"))
 
 if not CATALOG_PATH:
-    print("[ ERROR ]: Missing CATALOG_PATH. Did you set the env?")
+    print(f"Usage: load.py <catalog-path>")
     exit()
 if not URI:
     print("[ ERROR ]: Missing NEO4J_DB_URI. Did you set the env?")
@@ -129,7 +132,7 @@ def process_course_requisites(tx, course):
     # Find the course by its code to get its UUID
     node = find_course_by_code(tx, code=course["code"])
     if node == None:
-        print("[ERROR]: Could not find previously imported course.")
+        print("[ERROR] Could not find previously imported course.")
         return  # Course not found (should not happen)
     course_uuid = node["uuid"]
     
@@ -150,11 +153,11 @@ def process_requisite(tx, req, parent_uuid):
         if course_code != None:
             node = find_course_by_code(tx, course_code)
             if node == None:
-                print(f"[WARN]: Could not find requisite course with course code '{course_code}'.")
+                print(f"[WARN] Could not find requisite course with course code '{course_code}'.")
                 return
             create_requires(tx, parent_uuid, node["uuid"])
         else:
-            print(f"[ERROR]: 'course' property was expected, but was not found")
+            print(f"[ERROR] 'course' property was expected, but was not found")
 
     elif t == "PLACEMENT":
         placement_name = req.get("placement", None)
@@ -162,7 +165,7 @@ def process_requisite(tx, req, parent_uuid):
             placement_uuid = create_placement(tx, placement_name)
             create_requires(tx, parent_uuid, placement_uuid)
         else:
-            print(f"[ERROR]: 'placement' property was expected, but was not found")
+            print(f"[ERROR] 'placement' property was expected, but was not found")
 
     elif t in ("AND", "OR"):
         requirements = req.get("requirements", None)
@@ -173,7 +176,7 @@ def process_requisite(tx, req, parent_uuid):
             for c in requirements:
                 process_requisite(tx, c, parent_uuid=reqgroup_uuid)
         else:
-            print(f"[ERROR]: 'requirements' property was expected, but was not found")
+            print(f"[ERROR] 'requirements' property was expected, but was not found")
 
     else:
         raise ValueError(f"Unknown requisite type: {t}, only NONE, COURSE, PLACEMENT, AND, OR are allowed.")

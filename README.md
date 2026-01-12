@@ -19,6 +19,12 @@ uv sync
 7. Set `.env` variable `NEO4J_DB_URI=neo4j://<Windows-IP>:7687`
 
 ## Running
+### Populating Database
 ```bash
-uv run main.py
+uv run load.py data/catalog.sample.json
+```
+
+### Finding Longest Requirement Chain
+```bash
+uv run longest_chain.py "CS 2401"
 ```
