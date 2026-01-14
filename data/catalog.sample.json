@@ -2,17 +2,24 @@
     {
         "name": "Elementary Topics in Mathematics I",
         "code": "MATH 1101",
-        "requisite": {"type": "NONE"}
+        "requisite": {
+            "type": "NONE"
+        }
     },
     {
         "name": "Elementary Topics in Mathematics II",
         "code": "MATH 1102",
-        "requisite": {"type": "COURSE", "course": "MATH 1101"}
+        "requisite": {
+            "type": "COURSE",
+            "course": "MATH 1101"
+        }
     },
     {
         "name": "Intermediate Algebra",
         "code": "MATH D005",
-        "requisite": {"type": "NONE"}
+        "requisite": {
+            "type": "NONE"
+        }
     },
     {
         "name": "College Algebra",
@@ -20,8 +27,14 @@
         "requisite": {
             "type": "OR",
             "requirements": [
-                {"type": "COURSE", "course": "MATH D005"},
-                {"type": "COURSE", "course": "MATH 1102"}
+                {
+                    "type": "COURSE",
+                    "course": "MATH D005"
+                },
+                {
+                    "type": "COURSE",
+                    "course": "MATH 1102"
+                }
             ]
         }
     },
@@ -31,9 +44,18 @@
         "requisite": {
             "type": "OR",
             "requirements": [
-                { "type": "COURSE", "course": "MATH 1200"},
-                { "type": "COURSE", "course": "MATH 1321"},
-                { "type": "PLACEMENT", "placement": "Math Placement Level 2"}
+                {
+                    "type": "COURSE",
+                    "course": "MATH 1200"
+                },
+                {
+                    "type": "COURSE",
+                    "course": "MATH 1321"
+                },
+                {
+                    "type": "PLACEMENT",
+                    "placement": "Math Placement Level 2"
+                }
             ]
         }
     },
@@ -43,10 +65,22 @@
         "requisite": {
             "type": "OR",
             "requirements": [
-                { "type": "COURSE", "course": "MATH 1350"},
-                { "type": "COURSE", "course": "MATH 1300"},
-                { "type": "COURSE", "course": "MATH 1322"},
-                { "type": "PLACEMENT", "placement": "Math Placement Level 3"}
+                {
+                    "type": "COURSE",
+                    "course": "MATH 1350"
+                },
+                {
+                    "type": "COURSE",
+                    "course": "MATH 1300"
+                },
+                {
+                    "type": "COURSE",
+                    "course": "MATH 1322"
+                },
+                {
+                    "type": "PLACEMENT",
+                    "placement": "Math Placement Level 3"
+                }
             ]
         }
     },
@@ -59,17 +93,35 @@
                 {
                     "type": "OR",
                     "requirements": [
-                        {"type": "COURSE", "course": "MATH 1200"},
-                        {"type": "PLACEMENT", "placement": "Math Placement Level 2"}
+                        {
+                            "type": "COURSE",
+                            "course": "MATH 1200"
+                        },
+                        {
+                            "type": "PLACEMENT",
+                            "placement": "Math Placement Level 2"
+                        }
                     ]
                 },
                 {
                     "type": "OR",
                     "requirements": [
-                        {"type": "COURSE", "course": "CS 1400"},
-                        {"type": "COURSE", "course": "CS 2300"},
-                        {"type": "COURSE", "course": "ET 2100"},
-                        {"type": "PLACEMENT", "placement": "Computer Science Placement Level 3"}
+                        {
+                            "type": "COURSE",
+                            "course": "CS 1400"
+                        },
+                        {
+                            "type": "COURSE",
+                            "course": "CS 2300"
+                        },
+                        {
+                            "type": "COURSE",
+                            "course": "ET 2100"
+                        },
+                        {
+                            "type": "PLACEMENT",
+                            "placement": "Computer Science Placement Level 3"
+                        }
                     ]
                 }
             ]
@@ -81,14 +133,47 @@
         "requisite": {
             "type": "AND",
             "requirements": [
-                {"type": "COURSE", "course": "CS 2400"},
+                {
+                    "type": "COURSE",
+                    "course": "CS 2400"
+                },
                 {
                     "type": "OR",
                     "requirements": [
-                        {"type": "COURSE", "course": "MATH 1300"},
-                        {"type": "COURSE", "course": "MATH 2301"},
-                        {"type": "PLACEMENT", "placement": "Math Placement Level 3"}
+                        {
+                            "type": "COURSE",
+                            "course": "MATH 1300"
+                        },
+                        {
+                            "type": "COURSE",
+                            "course": "MATH 2301"
+                        },
+                        {
+                            "type": "PLACEMENT",
+                            "placement": "Math Placement Level 3"
+                        }
                     ]
+                }
+            ]
+        }
+    },
+    {
+        "name": "Black Men and Masculinities",
+        "code": "AAS 3460",
+        "requisite": {
+            "type": "OR",
+            "requirements": [
+                {
+                    "type": "LEVEL",
+                    "level": "sophomore"
+                },
+                {
+                    "type": "LEVEL",
+                    "level": "junior"
+                },
+                {
+                    "type": "LEVEL",
+                    "level": "senior"
                 }
             ]
         }
