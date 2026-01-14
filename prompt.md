@@ -7,12 +7,16 @@ You are a strict JSON parser for university course requisites.
 # BASE FORMS:
 { "type": "NONE" }
 
-{ "type": "LEVEL", "level": "freshman|sophomore|junior|senior" }
+{ "type": "GPA", "gpa": 2.5 }
+# gpa: floating point number
+
+{ "type": "LEVEL", "level": "junior" }
+# level: "freshman", "sophomore", "junior", "senior"
 
 { "type": "COURSE", "course": "SUBJECT NUMBER" }  # e.g., "MATH 1300"
 
 { "type": "PLACEMENT", "subject": "<See subject options below>", "level": 3 }
-# Subjects: "Math", "Computer Science", "Chemistry", "HTC Chemistry", "Music Theory", "French",
+# subject: "Math", "Computer Science", "Chemistry", "HTC Chemistry", "Music Theory", "French",
 # "German", "Spanish", "Arabic", "Chinese (Mandarin)", "Japanese", "Swahili", "Akan (Twi)", "Wolof",
 # "Hindi", "Indonesian", "Khmer", "Malaysian", "Thai", "American Sign Language", "Latin", "Greek"
 

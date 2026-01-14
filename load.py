@@ -96,6 +96,22 @@ def create_level(tx, level):
     return level_req_uuid
 
 
+def create_gpa(tx, gpa):
+    gpa_req_uuid = str(uuid.uuid4())
+    tx.run(
+        """
+        CREATE (cr:GPA {
+            name: $name,
+            uuid: $uuid
+        })
+        """,
+        name=f"{gpa} GPA",
+        uuid=gpa_req_uuid,
+        gpa=gpa,
+    )
+    return gpa_req_uuid
+
+
 def create_other(tx, other):
     other_req_uuid = str(uuid.uuid4())
     tx.run(
@@ -200,6 +216,14 @@ def process_requisite(tx, req, parent_uuid):
 
     if t == "NONE":
         return None
+
+    elif t == "GPA":
+        gpa = req.get("gpa", None)
+        if gpa is not None:
+            gpa_uuid = create_gpa(tx, gpa)
+            create_requires(tx, parent_uuid, gpa_uuid)
+        else:
+            print("[ERROR] 'gpa' property was expected, but was not found")
 
     elif t == "COURSE":
         course_code = req.get("course", None)
