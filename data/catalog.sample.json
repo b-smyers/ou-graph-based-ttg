@@ -54,7 +54,8 @@
                 },
                 {
                     "type": "PLACEMENT",
-                    "placement": "Math Placement Level 2"
+                    "subject": "Math",
+                    "level": 2
                 }
             ]
         }
@@ -79,7 +80,8 @@
                 },
                 {
                     "type": "PLACEMENT",
-                    "placement": "Math Placement Level 3"
+                    "subject": "Math",
+                    "level": 3
                 }
             ]
         }
@@ -99,7 +101,8 @@
                         },
                         {
                             "type": "PLACEMENT",
-                            "placement": "Math Placement Level 2"
+                            "subject": "Math",
+                            "level": 2
                         }
                     ]
                 },
@@ -120,7 +123,8 @@
                         },
                         {
                             "type": "PLACEMENT",
-                            "placement": "Computer Science Placement Level 3"
+                            "subject": "Computer Science",
+                            "level": 3
                         }
                     ]
                 }
@@ -150,7 +154,8 @@
                         },
                         {
                             "type": "PLACEMENT",
-                            "placement": "Math Placement Level 3"
+                            "subject": "Math",
+                            "level": 3
                         }
                     ]
                 }

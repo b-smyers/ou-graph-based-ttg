@@ -54,16 +54,20 @@ def create_course(tx, course_code, course_name):
     return course_uuid
 
 
-def create_placement(tx, placement_name):
+def create_placement(tx, subject, level):
     placement_uuid = str(uuid.uuid4())
     tx.run(
         """
         CREATE (p:Placement {
             name: $name,
-            uuid: $uuid
+            uuid: $uuid,
+            subject: $subject,
+            level: $level
         })
         """,
-        name=placement_name,
+        name=f"{subject} Placement Level {level}",
+        subject=subject,
+        level=level,
         uuid=placement_uuid,
     )
     return placement_uuid
@@ -195,12 +199,17 @@ def process_requisite(tx, req, parent_uuid):
             print("[ERROR] 'course' property was expected, but was not found")
 
     elif t == "PLACEMENT":
-        placement_name = req.get("placement", None)
-        if placement_name is not None:
-            placement_uuid = create_placement(tx, placement_name)
-            create_requires(tx, parent_uuid, placement_uuid)
-        else:
+        placement_subject = req.get("subject", None)
+        placement_level = req.get("level", None)
+        if placement_subject is None:
             print("[ERROR] 'placement' property was expected, but was not found")
+            return
+        if placement_level is None:
+            print("[ERROR] 'level' property was expected, but was not found")
+            return
+
+        placement_uuid = create_placement(tx, placement_subject, placement_level)
+        create_requires(tx, parent_uuid, placement_uuid)
 
     elif t == "LEVEL":
         level_name = req.get("level", None)
