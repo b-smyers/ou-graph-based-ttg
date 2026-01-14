@@ -2,6 +2,7 @@
     {
         "name": "Elementary Topics in Mathematics I",
         "code": "MATH 1101",
+        "requisite_string": "",
         "requisite": {
             "type": "NONE"
         }
@@ -9,6 +10,7 @@
     {
         "name": "Elementary Topics in Mathematics II",
         "code": "MATH 1102",
+        "requisite_string": "",
         "requisite": {
             "type": "COURSE",
             "course": "MATH 1101"
@@ -17,6 +19,7 @@
     {
         "name": "Intermediate Algebra",
         "code": "MATH D005",
+        "requisite_string": "",
         "requisite": {
             "type": "NONE"
         }
@@ -24,6 +27,7 @@
     {
         "name": "College Algebra",
         "code": "MATH 1200",
+        "requisite_string": "",
         "requisite": {
             "type": "OR",
             "requirements": [
@@ -41,6 +45,7 @@
     {
         "name": "Pre-Calculus",
         "code": "MATH 1300",
+        "requisite_string": "",
         "requisite": {
             "type": "OR",
             "requirements": [
@@ -63,6 +68,7 @@
     {
         "name": "Calculus",
         "code": "MATH 2301",
+        "requisite_string": "",
         "requisite": {
             "type": "OR",
             "requirements": [
@@ -89,6 +95,7 @@
     {
         "name": "Computer Science I",
         "code": "CS 2400",
+        "requisite_string": "",
         "requisite": {
             "type": "AND",
             "requirements": [
@@ -134,6 +141,7 @@
     {
         "name": "Computer Science II",
         "code": "CS 2401",
+        "requisite_string": "",
         "requisite": {
             "type": "AND",
             "requirements": [
@@ -165,6 +173,7 @@
     {
         "name": "Black Men and Masculinities",
         "code": "AAS 3460",
+        "requisite_string": "",
         "requisite": {
             "type": "OR",
             "requirements": [

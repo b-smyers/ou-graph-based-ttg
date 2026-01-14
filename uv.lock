@@ -172,6 +172,7 @@ dependencies = [
     { name = "google-genai" },
     { name = "neo4j" },
     { name = "python-dotenv" },
+    { name = "tenacity" },
 ]
 
 [package.metadata]
@@ -179,6 +180,7 @@ requires-dist = [
     { name = "google-genai", specifier = ">=1.57.0" },
     { name = "neo4j", specifier = ">=6.0.3" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
+    { name = "tenacity", specifier = ">=9.1.2" },
 ]
 
 [[package]]
