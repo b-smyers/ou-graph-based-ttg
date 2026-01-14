@@ -11,3 +11,4 @@ wheels/
 
 # Misc.
 .env
+data/*.parsed.json

@@ -1,8 +1,0 @@
-[{"name": "Introduction to African American Studies", "code": "AAS 1060", "requisite": {"type": "NONE"}},
-{"name": "Introduction to African American Literature", "code": "AAS 1100", "requisite": {"type": "NONE"}},
-{"name": "Africana Media Studies", "code": "AAS 1500", "requisite": {"type": "NONE"}},
-{"name": "Africana Media Studies", "code": "AAS 1500", "requisite": {"type": "NONE"}},
-{"name": "Slave Narrative and Freeman/Freewomen Fiction of the 18th and 19th Centuries", "code": "AAS 2100", "requisite": {"type": "NONE"}},
-{"name": "African American Literature II: Black Writing of the 20th and 21st Centuries", "code": "AAS 2110", "requisite": {"type": "NONE"}},
-{"name": "History of the African American Worker", "code": "AAS 2250", "requisite": {"type": "NONE"}},
-{"name": "Blackness and the Arts", "code": "AAS 2500", "requisite": {"type": "OR", "requirements": [{"type": "LEVEL", "level": "sophomore"}, {"type": "LEVEL", "level": "junior"}, {"type": "LEVEL", "level": "senior"}]}}]
