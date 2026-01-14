@@ -1,12 +1,12 @@
-# load.py: Clears the database before loading the data from the provided <catalog-path> into the database
-
 from dotenv import load_dotenv
-load_dotenv()
 import os
 import sys
 from neo4j import GraphDatabase
 import uuid
 import json
+
+load_dotenv()
+# load.py: Clears the database before loading the data from the provided <catalog-path> into the database
 
 # Config
 CATALOG_PATH = sys.argv[1] if len(sys.argv) >= 2 else None
@@ -14,7 +14,7 @@ URI = os.getenv("NEO4J_DB_URI")
 AUTH = (os.getenv("NEO4J_USERNAME"), os.getenv("NEO4J_PASSWORD"))
 
 if not CATALOG_PATH:
-    print(f"Usage: load.py <catalog-path>")
+    print("Usage: load.py <catalog-path>")
     exit()
 if not URI:
     print("[ ERROR ]: Missing NEO4J_DB_URI. Did you set the env?")
@@ -23,16 +23,18 @@ if not AUTH[0] or not AUTH[1]:
     print("[ ERROR ]: Missing NEO4J_USERNAME or NEO4J_PASSWORD. Did you set the env?")
     exit()
 
-driver = GraphDatabase.driver(URI, auth=AUTH)
+driver = GraphDatabase.driver(URI, auth=AUTH)  # type: ignore
 driver.verify_connectivity()
 
 # Load catalog from external JSON file
 with open(CATALOG_PATH, "r", encoding="utf-8") as f:
     catalog = json.load(f)
 
+
 # Utility functions
 def clear_db(session):
     session.execute_write(lambda tx: tx.run("MATCH (n) DETACH DELETE n"))
+
 
 ## Create
 def create_course(tx, course_code, course_name):
@@ -47,9 +49,10 @@ def create_course(tx, course_code, course_name):
         """,
         name=course_name,
         code=course_code,
-        uuid=course_uuid
+        uuid=course_uuid,
     )
     return course_uuid
+
 
 def create_placement(tx, placement_name):
     placement_uuid = str(uuid.uuid4())
@@ -61,9 +64,32 @@ def create_placement(tx, placement_name):
         })
         """,
         name=placement_name,
-        uuid=placement_uuid
+        uuid=placement_uuid,
     )
     return placement_uuid
+
+
+def create_level(tx, level):
+    level_to_credits = {"freshman": 0, "sophomore": 30, "junior": 60, "senior": 90}
+    if not level_to_credits[level]:
+        print(
+            f"[ ERROR ]: '{level}' did not match any level options: {', '.join(list(level_to_credits.keys()))}"
+        )
+    level_req_uuid = str(uuid.uuid4())
+    tx.run(
+        """
+        CREATE (cr:Level {
+            name: $name,
+            uuid: $uuid,
+            credits: $credits
+        })
+        """,
+        name=level.title(),
+        uuid=level_req_uuid,
+        credits=level_to_credits[level],
+    )
+    return level_req_uuid
+
 
 def create_reqgroup(tx, group_type):
     reqgroup_uuid = str(uuid.uuid4())
@@ -76,9 +102,10 @@ def create_reqgroup(tx, group_type):
         })
         """,
         type=group_type,
-        uuid=reqgroup_uuid
+        uuid=reqgroup_uuid,
     )
     return reqgroup_uuid
+
 
 def create_requires(tx, parent_uuid, child_uuid):
     tx.run(
@@ -92,8 +119,9 @@ def create_requires(tx, parent_uuid, child_uuid):
         MERGE (parent)-[:REQUIRES]->(child)
         """,
         parent_uuid=parent_uuid,
-        child_uuid=child_uuid
+        child_uuid=child_uuid,
     )
+
 
 ## Read
 def find_course_by_code(tx, code):
@@ -104,13 +132,15 @@ def find_course_by_code(tx, code):
         })
         RETURN node
         """,
-        code=code
+        code=code,
     )
 
     record = result.single()
-    if record is None: return
+    if record is None:
+        return
     node = record["node"]
     return node
+
 
 def find_by_uuid(tx, node_uuid):
     result = tx.run(
@@ -120,26 +150,29 @@ def find_by_uuid(tx, node_uuid):
         })
         RETURN node
         """,
-        uuid=node_uuid
+        uuid=node_uuid,
     )
 
     record = result.single()
-    if record is None: return
+    if record is None:
+        return
     node = record["node"]
     return node
+
 
 def process_course_requisites(tx, course):
     # Find the course by its code to get its UUID
     node = find_course_by_code(tx, code=course["code"])
-    if node == None:
+    if node is None:
         print("[ERROR] Could not find previously imported course.")
         return  # Course not found (should not happen)
     course_uuid = node["uuid"]
-    
+
     # Process its requisites
     req = course.get("requisite", {"type": "NONE"})
     if req["type"] != "NONE":
         process_requisite(tx, req, parent_uuid=course_uuid)
+
 
 # Recursive function to process requisites
 def process_requisite(tx, req, parent_uuid):
@@ -150,36 +183,49 @@ def process_requisite(tx, req, parent_uuid):
 
     elif t == "COURSE":
         course_code = req.get("course", None)
-        if course_code != None:
+        if course_code is not None:
             node = find_course_by_code(tx, course_code)
-            if node == None:
-                print(f"[WARN] Could not find requisite course with course code '{course_code}'.")
+            if node is None:
+                print(
+                    f"[WARN] Could not find requisite course with course code '{course_code}'."
+                )
                 return
             create_requires(tx, parent_uuid, node["uuid"])
         else:
-            print(f"[ERROR] 'course' property was expected, but was not found")
+            print("[ERROR] 'course' property was expected, but was not found")
 
     elif t == "PLACEMENT":
         placement_name = req.get("placement", None)
-        if placement_name != None:
+        if placement_name is not None:
             placement_uuid = create_placement(tx, placement_name)
             create_requires(tx, parent_uuid, placement_uuid)
         else:
-            print(f"[ERROR] 'placement' property was expected, but was not found")
+            print("[ERROR] 'placement' property was expected, but was not found")
+
+    elif t == "LEVEL":
+        level_name = req.get("level", None)
+        if level_name is not None:
+            level_uuid = create_level(tx, level_name)
+            create_requires(tx, parent_uuid, level_uuid)
+        else:
+            print("[ERROR] 'level' property was expected, but was not found")
 
     elif t in ("AND", "OR"):
         requirements = req.get("requirements", None)
-        if requirements != None:
+        if requirements is not None:
             reqgroup_uuid = create_reqgroup(tx, t)
             create_requires(tx, parent_uuid, reqgroup_uuid)
 
             for c in requirements:
                 process_requisite(tx, c, parent_uuid=reqgroup_uuid)
         else:
-            print(f"[ERROR] 'requirements' property was expected, but was not found")
+            print("[ERROR] 'requirements' property was expected, but was not found")
 
     else:
-        raise ValueError(f"Unknown requisite type: {t}, only NONE, COURSE, PLACEMENT, AND, OR are allowed.")
+        raise ValueError(
+            f"Unknown requisite type: {t}, only NONE, LEVEL, COURSE, PLACEMENT, AND, OR are allowed."
+        )
+
 
 def main():
     with driver.session() as session:
@@ -190,12 +236,12 @@ def main():
         # First pass: Create all course nodes
         for course in catalog:
             session.execute_write(create_course, course["code"], course["name"])
-        
+
         print("[INFO] Creating requisites relationships.")
         # Second pass: Process requisites
         for course in catalog:
             session.execute_write(process_course_requisites, course)
-    
+
     print("[INFO] Catalog loaded into Neo4j.")
 
 
