@@ -191,5 +191,40 @@
                 }
             ]
         }
+    },
+    {
+        "name": "Methods in Art History",
+        "code": "AH 4711",
+        "requisite_string": "(AH 2110 and 2130) and (3 courses in AH at 3000 or 4000 level) and JR or SR only",
+        "requisite": {
+            "type": "AND",
+            "requirements": [
+                {
+                    "type": "COURSE",
+                    "course": "AH 2110"
+                },
+                {
+                    "type": "COURSE",
+                    "course": "AH 2130"
+                },
+                {
+                    "type": "OTHER",
+                    "other": "3 courses in AH at 3000 or 4000 level"
+                },
+                {
+                    "type": "OR",
+                    "requirements": [
+                        {
+                            "type": "LEVEL",
+                            "level": "junior"
+                        },
+                        {
+                            "type": "LEVEL",
+                            "level": "senior"
+                        }
+                    ]
+                }
+            ]
+        }
     }
 ]

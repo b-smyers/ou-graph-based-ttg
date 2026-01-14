@@ -75,10 +75,11 @@ def create_placement(tx, subject, level):
 
 def create_level(tx, level):
     level_to_credits = {"freshman": 0, "sophomore": 30, "junior": 60, "senior": 90}
-    if not level_to_credits[level]:
+    if level not in level_to_credits:
         print(
             f"[ ERROR ]: '{level}' did not match any level options: {', '.join(list(level_to_credits.keys()))}"
         )
+        return None
     level_req_uuid = str(uuid.uuid4())
     tx.run(
         """
@@ -93,6 +94,21 @@ def create_level(tx, level):
         credits=level_to_credits[level],
     )
     return level_req_uuid
+
+
+def create_other(tx, other):
+    other_req_uuid = str(uuid.uuid4())
+    tx.run(
+        """
+        CREATE (cr:OTHER {
+            name: $name,
+            uuid: $uuid
+        })
+        """,
+        name=other,
+        uuid=other_req_uuid,
+    )
+    return other_req_uuid
 
 
 def create_reqgroup(tx, group_type):
@@ -229,6 +245,14 @@ def process_requisite(tx, req, parent_uuid):
                 process_requisite(tx, c, parent_uuid=reqgroup_uuid)
         else:
             print("[ERROR] 'requirements' property was expected, but was not found")
+
+    elif t == "OTHER":
+        other = req.get("other", None)
+        if other is not None:
+            other_uuid = create_other(tx, other)
+            create_requires(tx, parent_uuid, other_uuid)
+        else:
+            print("[ERROR] 'other' property was expected, but was not found")
 
     else:
         raise ValueError(

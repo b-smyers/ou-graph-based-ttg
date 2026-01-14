@@ -37,6 +37,8 @@ SYSTEM_PROMPT = """You are a strict JSON parser for university course requisites
 # "German", "Spanish", "Arabic", "Chinese (Mandarin)", "Japanese", "Swahili", "Akan (Twi)", "Wolof",
 # "Hindi", "Indonesian", "Khmer", "Malaysian", "Thai", "American Sign Language", "Latin", "Greek"
 
+{ "type": "OTHER", "other": "<uncategorized requirement>" }
+
 # RECURSIVE FORMS:
 { "type": "AND", "requirements": [ <requisite-objects> ] }
 
@@ -50,25 +52,14 @@ A <requisite-object> can be ANY of the above forms, including nested AND/OR.
 - "requirements" arrays must contain at least 2 items for AND/OR
 - COURSE format: Subject (uppercase) Space Number (e.g., "PHYS 2011")
 - If no prerequisite exists, ALWAYS use: { "type": "NONE" }
+- Only use OTHER if the requirement does not match any of the other base forms
+- Only use OTHER as a last resort
 
 # EXAMPLES OF VALID RECURSIVE STRUCTURES:
 
-## Simple OR
-{
-    "type": "OR",
-    "requirements": [
-        {
-            "type": "COURSE",
-            "course": "MATH D005"
-        },
-        {
-            "type": "COURSE",
-            "course": "MATH 1102"
-        }
-    ]
-}
-
 ## Level OR
+Input: "Soph or Jr or Sr"
+Output:
 {
     "type": "OR",
     "requirements": [
@@ -87,7 +78,9 @@ A <requisite-object> can be ANY of the above forms, including nested AND/OR.
     ]
 }
 
-## Course OR Placement
+## COURSE OR PLACEMENT
+Input: "(C or better in MATH 1200 or MATH 1321) or math placement level 2 or higher WARNING: No credit for both this course and MATH 1322 (first course taken deducted)"
+Output:
 {
     "type": "OR",
     "requirements": [
@@ -101,12 +94,49 @@ A <requisite-object> can be ANY of the above forms, including nested AND/OR.
         },
         {
             "type": "PLACEMENT",
-            "placement": "Math Placement Level 2"
+            "subject": "Math",
+            "level": 2
+        }
+    ]
+}
+
+## OR OTHER
+Input: "(AH 2110 and 2130) and (3 courses in AH at 3000 or 4000 level) and JR or SR only"
+Output:
+{
+    "type": "AND",
+    "requirements": [
+        {
+            "type": "COURSE",
+            "course": "AH 2110"
+        },
+        {
+            "type": "COURSE",
+            "course": "AH 2130"
+        },
+        {
+            "type": "OTHER",
+            "other": "3 courses in AH at 3000 or 4000 level"
+        },
+        {
+            "type": "OR",
+            "requirements": [
+            {
+                "type": "LEVEL",
+                "level": "junior"
+            },
+            {
+                "type": "LEVEL",
+                "level": "senior"
+            }
+            ]
         }
     ]
 }
 
 ## Nested OR inside AND
+Input: "CS 2400 and (MATH 1300 or 2301 or Math Placement Level 3)"
+Output:
 {
     "type": "AND",
     "requirements": [
@@ -116,7 +146,7 @@ A <requisite-object> can be ANY of the above forms, including nested AND/OR.
         },
         {
             "type": "OR",
-            "requirements": [
+            "requirements": 
                 {
                     "type": "COURSE",
                     "course": "MATH 1300"
@@ -127,7 +157,8 @@ A <requisite-object> can be ANY of the above forms, including nested AND/OR.
                 },
                 {
                     "type": "PLACEMENT",
-                    "placement": "Math Placement Level 3"
+                    "subject": "Math",
+                    "level": 3
                 }
             ]
         }
@@ -136,7 +167,7 @@ A <requisite-object> can be ANY of the above forms, including nested AND/OR.
 
 # REMEMBER: Output ONLY the JSON object, nothing else."""
 
-ALLOWED_TYPES = {"NONE", "LEVEL", "COURSE", "PLACEMENT", "AND", "OR"}
+ALLOWED_TYPES = {"NONE", "LEVEL", "COURSE", "PLACEMENT", "AND", "OR", "OTHER"}
 
 # --------------------
 # Validation / Sanitization
@@ -177,6 +208,9 @@ def sanitize_requisite(obj: dict) -> dict:
             "type": t,
             "requirements": [sanitize_requisite(r) for r in reqs],
         }
+
+    if t == "OTHER":
+        return {"type": "OTHER", "other": obj["other"]}
 
     raise AssertionError("Unreachable")
 
@@ -221,7 +255,7 @@ def parse_requisite(raw_text) -> dict:
     response = prompt_model(prompt)
 
     try:
-        parsed = json.loads(response.text)
+        parsed = json.loads(response.text or "")
     except json.JSONDecodeError as e:
         raise RuntimeError(f"Invalid JSON from LLM: {response.text}") from e
 
