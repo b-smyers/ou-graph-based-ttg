@@ -162,12 +162,12 @@ def main():
     # Register signal handler
     signal.signal(signal.SIGINT, signal_handler)
 
-    if len(sys.argv) < 2:
+    input_path = sys.argv[1] if len(sys.argv) >= 2 else None
+    output_path = sys.argv[2] if len(sys.argv) >= 3 else None
+
+    if len(sys.argv) < 2 or input_path is None or output_path is None:
         print("Usage: parse_requisites.py <input.json> [output.json]", file=sys.stderr)
         sys.exit(1)
-
-    input_path = sys.argv[1]
-    output_path = sys.argv[2] if len(sys.argv) >= 3 else None
 
     with open(input_path, "r", encoding="utf-8") as f:
         raw_courses = json.load(f)
