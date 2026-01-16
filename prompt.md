@@ -38,6 +38,10 @@ A <requisite-object> can be ANY of the above forms, including nested AND/OR.
 - "requirements" arrays must contain at least 2 items for AND/OR
 - COURSE format: Subject (uppercase) Space Number (e.g., "PHYS 2011")
 - If no prerequisite exists, ALWAYS use: { "type": "NONE" }
+- Do not map "concurrent" to anything, please ignore it
+- Only return a JSON object, never return a JSON array
+    - Good: { "type": "OR", "requirements": [{ "type": "COURSE", "course": "MATH 1200" }, {"type": "COURSE", "course": "MATH 1300"}] }
+    - Bad: [{ "type": "COURSE", "course": "MATH 1200" }, {"type": "COURSE", "course": "MATH 1300"}]
 - Only use OTHER if the requirement does not match any of the other base forms
 - Only use OTHER as a last resort
 
@@ -64,8 +68,33 @@ Output:
     ]
 }
 
+## Chained courses
+Input: "AST 1010, 1020, 2010, 2020"
+Output:
+{
+    "type": "AND",
+    "requirements": [
+        {
+            "type": "COURSE",
+            "course": "AST 1010"
+        },
+        {
+            "type": "COURSE",
+            "course": "AST 1020"
+        },
+        {
+            "type": "COURSE",
+            "course": "AST 2010"
+        },
+        {
+            "type": "COURSE",
+            "course": "AST 2020"
+        }
+    ]
+}
+
 ## COURSE OR PLACEMENT
-Input: "(C or better in MATH 1200 or MATH 1321) or math placement level 2 or higher WARNING: No credit for both this course and MATH 1322 (first course taken deducted)"
+Input: "(C or better in MATH 1200 or MATH 1321) or MATH PL2 or higher WARNING: No credit for both this course and MATH 1322 (first course taken deducted)"
 Output:
 {
     "type": "OR",

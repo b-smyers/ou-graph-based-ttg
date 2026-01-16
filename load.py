@@ -57,22 +57,27 @@ def create_course(tx, course_code, course_name, requisite_string):
 
 
 def create_placement(tx, subject, level):
-    placement_uuid = str(uuid.uuid4())
-    tx.run(
+    new_uuid = str(uuid.uuid4())
+    placement_name = f"{subject} Placement Level {level}"
+
+    # MERGE based on the unique combination of subject and level
+    result = tx.run(
         """
-        CREATE (p:Placement {
-            name: $name,
-            uuid: $uuid,
-            subject: $subject,
-            level: $level
-        })
+        MERGE (p:Placement { subject: $subject, level: $level })
+        ON CREATE SET 
+            p.uuid = $uuid,
+            p.name = $name
+        RETURN p.uuid AS uuid
         """,
-        name=f"{subject} Placement Level {level}",
         subject=subject,
         level=level,
-        uuid=placement_uuid,
+        name=placement_name,
+        uuid=new_uuid,
     )
-    return placement_uuid
+
+    # Return the UUID (either the pre-existing one or the one we just generated)
+    record = result.single()
+    return record["uuid"]
 
 
 def create_level(tx, level):
@@ -82,20 +87,27 @@ def create_level(tx, level):
             f"[ ERROR ]: '{level}' did not match any level options: {', '.join(list(level_to_credits.keys()))}"
         )
         return None
+
+    level_name = level.title()
     level_req_uuid = str(uuid.uuid4())
-    tx.run(
+
+    # Use MERGE to find or create the node based on the name
+    result = tx.run(
         """
-        CREATE (cr:Level {
-            name: $name,
-            uuid: $uuid,
-            credits: $credits
-        })
+        MERGE (cr:Level { name: $name })
+        ON CREATE SET 
+            cr.uuid = $uuid, 
+            cr.credits = $credits
+        RETURN cr.uuid as uuid
         """,
-        name=level.title(),
+        name=level_name,
         uuid=level_req_uuid,
         credits=level_to_credits[level],
     )
-    return level_req_uuid
+
+    # Return the uuid (either the existing one or the new one)
+    record = result.single()
+    return record["uuid"]
 
 
 def create_permission(tx, authority):
@@ -316,9 +328,15 @@ def main():
         print("[INFO] Cleared DB.")
         clear_db(session)
 
-        print(f"[INFO] Creating {len(catalog)} course nodes.")
+        total_courses = len(catalog)
+
+        print(f"[INFO] Creating {total_courses} course nodes.")
         # First pass: Create all course nodes
-        for course in catalog:
+        for i, course in enumerate(catalog):
+            if i % 100 == 0:
+                print(
+                    f"[INFO] Creating courses {i}/{total_courses} - {round(100 * i / total_courses, 2)}%"
+                )
             session.execute_write(
                 create_course,
                 course["code"],
@@ -328,7 +346,11 @@ def main():
 
         print("[INFO] Creating requisites relationships.")
         # Second pass: Process requisites
-        for course in catalog:
+        for i, course in enumerate(catalog):
+            if i % 100 == 0:
+                print(
+                    f"[INFO] Processing course requisites {i}/{total_courses} - {round(100 * i / total_courses, 2)}%"
+                )
             session.execute_write(process_course_requisites, course)
 
     print("[INFO] Catalog loaded into Neo4j.")

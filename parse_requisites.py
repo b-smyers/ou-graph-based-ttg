@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 
 import os
+import statistics
 import sys
 import json
 import signal
+import time
 from tenacity import retry, wait_random_exponential
 from dotenv import load_dotenv
 from google import genai
@@ -217,10 +219,12 @@ def main():
     skipped = 0
     new_processed = 0
     errors = 0
+    times = []
 
     try:
         # Process new courses
         for i, c in enumerate(raw_courses):
+            start = time.time()
             # Check for interrupt
             if interrupted:
                 print("\n[INFO] Interrupt detected. Saving current progress...")
@@ -234,7 +238,14 @@ def main():
                 skipped += 1
                 continue
 
-            print(f"Processing {i + 1}/{total}: {course_code}")
+            avg_time = statistics.mean(times) if times else 0.0
+            items_remaining = total - i
+            eta_seconds = avg_time * items_remaining
+
+            print(
+                f"[INFO] Processing {i + 1}/{total} "
+                f"(ETA: {eta_seconds:.2f}s): {course_code}"
+            )
 
             # Explicit field mapping
             name = c.get("title")
@@ -246,6 +257,7 @@ def main():
                     file=sys.stderr,
                 )
                 errors += 1
+                times.append(time.time() - start)
                 continue
 
             try:
@@ -284,6 +296,7 @@ def main():
                 new_processed += 1
                 processed_count += 1
                 errors += 1
+            times.append(time.time() - start)
 
     except KeyboardInterrupt:
         # This handles KeyboardInterrupt raised by the signal handler
