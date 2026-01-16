@@ -22,7 +22,17 @@ MODEL_NAME = "gemini-2.0-flash-lite"
 with open("prompt.md", "r") as file:
     SYSTEM_PROMPT = file.read()
 
-ALLOWED_TYPES = {"NONE", "GPA", "LEVEL", "COURSE", "PLACEMENT", "AND", "OR", "OTHER"}
+ALLOWED_TYPES = {
+    "NONE",
+    "PERMISSION",
+    "GPA",
+    "LEVEL",
+    "COURSE",
+    "PLACEMENT",
+    "AND",
+    "OR",
+    "OTHER",
+}
 
 # --------------------
 # Validation / Sanitization
@@ -40,6 +50,9 @@ def sanitize_requisite(obj: dict) -> dict:
 
     if t == "NONE":
         return {"type": "NONE"}
+
+    if t == "PERMISSION":
+        return {"type": "PERMISSION", "authority": obj["authority"]}
 
     if t == "GPA":
         return {"type": "GPA", "gpa": float(obj["gpa"])}

@@ -7,6 +7,9 @@ You are a strict JSON parser for university course requisites.
 # BASE FORMS:
 { "type": "NONE" }
 
+{"type": "PERMISSION", "authority": "Instructor"}
+# authority: Use "Instructor" for generic "Permission Required"
+
 { "type": "GPA", "gpa": 2.5 }
 # gpa: floating point number
 

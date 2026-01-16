@@ -98,6 +98,23 @@ def create_level(tx, level):
     return level_req_uuid
 
 
+def create_permission(tx, authority):
+    permission_req_uuid = str(uuid.uuid4())
+    tx.run(
+        """
+        CREATE (cr:PERMISSION {
+            name: $name,
+            uuid: $uuid,
+            authority: $authority
+        })
+        """,
+        name=f"Permission from {authority}",
+        uuid=permission_req_uuid,
+        authority=authority,
+    )
+    return permission_req_uuid
+
+
 def create_gpa(tx, gpa):
     gpa_req_uuid = str(uuid.uuid4())
     tx.run(
@@ -218,6 +235,14 @@ def process_requisite(tx, req, parent_uuid):
 
     if t == "NONE":
         return None
+
+    if t == "PERMISSION":
+        permission_authority = req.get("authority", None)
+        if permission_authority is not None:
+            permission_uuid = create_permission(tx, permission_authority)
+            create_requires(tx, parent_uuid, permission_uuid)
+        else:
+            print("[ERROR] 'authority' property was expected, but was not found")
 
     elif t == "GPA":
         gpa = req.get("gpa", None)
