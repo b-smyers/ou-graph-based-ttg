@@ -37,19 +37,21 @@ def clear_db(session):
 
 
 ## Create
-def create_course(tx, course_code, course_name):
+def create_course(tx, course_code, course_name, requisite_string):
     course_uuid = str(uuid.uuid4())
     tx.run(
         """
         MERGE (c:Course {
             name: $name,
             uuid: $uuid,
-            code: $code
+            code: $code,
+            requisite_string: $requisite_string
         })
         """,
         name=course_name,
         code=course_code,
         uuid=course_uuid,
+        requisite_string=requisite_string,
     )
     return course_uuid
 
@@ -292,7 +294,12 @@ def main():
         print(f"[INFO] Creating {len(catalog)} course nodes.")
         # First pass: Create all course nodes
         for course in catalog:
-            session.execute_write(create_course, course["code"], course["name"])
+            session.execute_write(
+                create_course,
+                course["code"],
+                course["name"],
+                course["requisite_string"] or "",
+            )
 
         print("[INFO] Creating requisites relationships.")
         # Second pass: Process requisites
