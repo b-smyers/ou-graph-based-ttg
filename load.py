@@ -225,7 +225,7 @@ def process_course_requisites(tx, course):
 
     # Process its requisites
     req = course.get("requisite", {"type": "NONE"})
-    if req["type"] != "NONE":
+    if req is not None and req["type"] != "NONE":
         process_requisite(tx, req, parent_uuid=course_uuid)
 
 
