@@ -295,7 +295,7 @@ def main():
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(processed_courses, f, ensure_ascii=False, indent=2)
 
-        print(f"\nSummary:")
+        print("\nSummary:")
         print(f"  Total courses in input: {total}")
         print(f"  Already processed (from file): {len(existing_courses)}")
         print(f"  Skipped (already in file): {skipped}")
@@ -305,7 +305,7 @@ def main():
 
         if interrupted:
             print(f"\n[INFO] Processing interrupted. Progress saved to {output_path}")
-            print(f"       Resume by running the same command again.")
+            print("       Resume by running the same command again.")
             sys.exit(130)  # Standard exit code for SIGINT
         else:
             print(f"\n[SUCCESS] All courses processed and saved to {output_path}")
