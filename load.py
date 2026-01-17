@@ -41,7 +41,7 @@ def create_course(tx, course_code, course_name, requisite_string):
     course_uuid = str(uuid.uuid4())
     tx.run(
         """
-        MERGE (c:Course {
+        MERGE (c:COURSE {
             name: $name,
             uuid: $uuid,
             code: $code,
@@ -63,7 +63,7 @@ def create_placement(tx, subject, level):
     # MERGE based on the unique combination of subject and level
     result = tx.run(
         """
-        MERGE (p:Placement { subject: $subject, level: $level })
+        MERGE (p:PLACEMENT { subject: $subject, level: $level })
         ON CREATE SET 
             p.uuid = $uuid,
             p.name = $name
@@ -94,7 +94,7 @@ def create_level(tx, level):
     # Use MERGE to find or create the node based on the name
     result = tx.run(
         """
-        MERGE (cr:Level { name: $name })
+        MERGE (cr:LEVEL { name: $name })
         ON CREATE SET 
             cr.uuid = $uuid, 
             cr.credits = $credits
@@ -194,7 +194,7 @@ def create_requires(tx, parent_uuid, child_uuid):
 def find_course_by_code(tx, code):
     result = tx.run(
         """
-        MATCH (node:Course {
+        MATCH (node:COURSE {
             code: $code
         })
         RETURN node
