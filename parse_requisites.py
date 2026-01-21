@@ -69,7 +69,7 @@ def sanitize_requisite(obj: dict) -> dict:
         return {
             "type": "PLACEMENT",
             "subject": obj["subject"],
-            "level": int(obj["level"]),
+            "level": obj["level"],
         }
 
     if t in ("AND", "OR"):
