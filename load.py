@@ -37,16 +37,14 @@ def clear_db(session):
 
 
 ## Create
-def create_course(
-    tx,
-    course_code,
-    course_name,
-    requisite_string,
-    component,
-    bricks,
-    min_credits,
-    max_credits,
-):
+def create_course(tx, course):
+    code = course.get("code", "")
+    name = course.get("name", "")
+    requisite_string = course.get("requisite_string", "") or ""
+    component = course.get("component", "") or ""
+    bricks = course.get("bricks", []) or []
+    min_credits = course.get("min_credits", "") or ""
+    max_credits = course.get("max_credits", "") or ""
     course_uuid = str(uuid.uuid4())
     tx.run(
         """
@@ -61,8 +59,8 @@ def create_course(
             max_credits: $max_credits
         })
         """,
-        name=course_name,
-        code=course_code,
+        name=name,
+        code=code,
         uuid=course_uuid,
         requisite_string=requisite_string,
         component=component,
@@ -207,6 +205,22 @@ def create_requires(tx, parent_uuid, child_uuid):
     )
 
 
+def create_concurrent(tx, parent_uuid, child_uuid):
+    tx.run(
+        """
+        MATCH (parent {
+            uuid: $parent_uuid
+        })
+        MERGE (child {
+            uuid: $child_uuid
+        })
+        MERGE (parent)-[:CONCURRENT]->(child)
+        """,
+        parent_uuid=parent_uuid,
+        child_uuid=child_uuid,
+    )
+
+
 ## Read
 def find_course_by_code(tx, code):
     result = tx.run(
@@ -259,14 +273,14 @@ def process_course_requisites(tx, course):
 
 
 # Recursive function to process requisites
-def process_requisite(tx, req, parent_uuid):
-    t = req.get("type", "NONE")
+def process_requisite(tx, parent_req, parent_uuid):
+    t = parent_req.get("type", "NONE")
 
     if t == "NONE":
         return None
 
     if t == "PERMISSION":
-        permission_authority = req.get("authority", None)
+        permission_authority = parent_req.get("authority", None)
         if permission_authority is not None:
             permission_uuid = create_permission(tx, permission_authority)
             create_requires(tx, parent_uuid, permission_uuid)
@@ -274,7 +288,7 @@ def process_requisite(tx, req, parent_uuid):
             print("[ERROR] 'authority' property was expected, but was not found")
 
     elif t == "GPA":
-        gpa = req.get("gpa", None)
+        gpa = parent_req.get("gpa", None)
         if gpa is not None:
             gpa_uuid = create_gpa(tx, gpa)
             create_requires(tx, parent_uuid, gpa_uuid)
@@ -282,7 +296,7 @@ def process_requisite(tx, req, parent_uuid):
             print("[ERROR] 'gpa' property was expected, but was not found")
 
     elif t == "COURSE":
-        course_code = req.get("course", None)
+        course_code = parent_req.get("course", None)
         if course_code is not None:
             node = find_course_by_code(tx, course_code)
             if node is None:
@@ -290,13 +304,21 @@ def process_requisite(tx, req, parent_uuid):
                     f"[WARN] Could not find requisite course with course code '{course_code}'."
                 )
                 return
-            create_requires(tx, parent_uuid, node["uuid"])
+
+            timing = parent_req["timing"]
+            if timing == "CONCURRENT":
+                create_concurrent(tx, parent_uuid, node["uuid"])
+            elif timing == "COMPLETED":
+                create_requires(tx, parent_uuid, node["uuid"])
+            elif timing == "CONCURRENT_OR_COMPLETED":
+                create_concurrent(tx, parent_uuid, node["uuid"])
+                create_requires(tx, parent_uuid, node["uuid"])
         else:
             print("[ERROR] 'course' property was expected, but was not found")
 
     elif t == "PLACEMENT":
-        placement_subject = req.get("subject", None)
-        placement_level = req.get("level", None)
+        placement_subject = parent_req.get("subject", None)
+        placement_level = parent_req.get("level", None)
         if placement_subject is None:
             print("[ERROR] 'placement' property was expected, but was not found")
             return
@@ -308,7 +330,7 @@ def process_requisite(tx, req, parent_uuid):
         create_requires(tx, parent_uuid, placement_uuid)
 
     elif t == "LEVEL":
-        level_name = req.get("level", None)
+        level_name = parent_req.get("level", None)
         if level_name is not None:
             level_uuid = create_level(tx, level_name)
             create_requires(tx, parent_uuid, level_uuid)
@@ -316,7 +338,7 @@ def process_requisite(tx, req, parent_uuid):
             print("[ERROR] 'level' property was expected, but was not found")
 
     elif t in ("AND", "OR"):
-        requirements = req.get("requirements", None)
+        requirements = parent_req.get("requirements", None)
         if requirements is not None:
             reqgroup_uuid = create_reqgroup(tx, t)
             create_requires(tx, parent_uuid, reqgroup_uuid)
@@ -327,7 +349,7 @@ def process_requisite(tx, req, parent_uuid):
             print("[ERROR] 'requirements' property was expected, but was not found")
 
     elif t == "OTHER":
-        other = req.get("other", None)
+        other = parent_req.get("other", None)
         if other is not None:
             other_uuid = create_other(tx, other)
             create_requires(tx, parent_uuid, other_uuid)
@@ -354,16 +376,7 @@ def main():
                 print(
                     f"[INFO] Creating courses {i}/{total_courses} - {round(100 * i / total_courses, 2)}%"
                 )
-            session.execute_write(
-                create_course,
-                course.get("code", ""),
-                course.get("name", ""),
-                course.get("requisite_string", "") or "",
-                course.get("component", "") or "",
-                course.get("bricks", []) or [],
-                course.get("min_credits", "") or "",
-                course.get("max_credits", "") or "",
-            )
+            session.execute_write(create_course, course)
 
         print("[INFO] Creating requisites relationships.")
         # Second pass: Process requisites

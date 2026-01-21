@@ -63,7 +63,7 @@ def sanitize_requisite(obj: dict) -> dict:
         return {"type": "LEVEL", "level": obj["level"].lower()}
 
     if t == "COURSE":
-        return {"type": "COURSE", "course": obj["course"]}
+        return {"type": "COURSE", "course": obj["course"], "timing": obj["timing"]}
 
     if t == "PLACEMENT":
         return {
@@ -95,6 +95,22 @@ def convert_string_to_list(text):
 
     # Split by comma and strip whitespace from each resulting item
     return [item.strip() for item in text.split(",")]
+
+
+def format_duration(seconds: int) -> str:
+    seconds = int(seconds)
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+
+    parts = []
+    if h:
+        parts.append(f"{h}h")
+    if m:
+        parts.append(f"{m}m")
+    if s or not parts:
+        parts.append(f"{s}s")
+
+    return " ".join(parts)
 
 
 # --------------------
@@ -244,16 +260,16 @@ def main():
 
             # Skip if course already exists in output
             if course_code in existing_course_codes:
-                skipped += 1
+                skipped += 1  # This skips labs that are in different sections
                 continue
 
-            avg_time = statistics.mean(times) if times else 0.0
-            items_remaining = total - i
-            eta_seconds = avg_time * items_remaining
+            median = statistics.median(times if times else [0])
+            slow_rate = sum(t > 3 for t in times) / (len(times) or 1)
+            eta = (total - i) * (median + slow_rate * 9)
 
             print(
                 f"[INFO] Processing {i + 1}/{total} "
-                f"(ETA: {eta_seconds:.2f}s): {course_code}"
+                f"(ETA: {format_duration(int(eta))}): {course_code}"
             )
 
             # Explicit field mapping
