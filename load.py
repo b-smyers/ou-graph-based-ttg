@@ -37,7 +37,16 @@ def clear_db(session):
 
 
 ## Create
-def create_course(tx, course_code, course_name, requisite_string):
+def create_course(
+    tx,
+    course_code,
+    course_name,
+    requisite_string,
+    component,
+    bricks,
+    min_credits,
+    max_credits,
+):
     course_uuid = str(uuid.uuid4())
     tx.run(
         """
@@ -45,13 +54,21 @@ def create_course(tx, course_code, course_name, requisite_string):
             name: $name,
             uuid: $uuid,
             code: $code,
-            requisite_string: $requisite_string
+            requisite_string: $requisite_string,
+            component: $component,
+            bricks: $bricks,
+            min_credits: $min_credits,
+            max_credits: $max_credits
         })
         """,
         name=course_name,
         code=course_code,
         uuid=course_uuid,
         requisite_string=requisite_string,
+        component=component,
+        bricks=bricks,
+        min_credits=min_credits,
+        max_credits=max_credits,
     )
     return course_uuid
 
@@ -339,9 +356,13 @@ def main():
                 )
             session.execute_write(
                 create_course,
-                course["code"],
-                course["name"],
-                course["requisite_string"] or "",
+                course.get("code", ""),
+                course.get("name", ""),
+                course.get("requisite_string", "") or "",
+                course.get("component", "") or "",
+                course.get("bricks", []) or [],
+                course.get("min_credits", "") or "",
+                course.get("max_credits", "") or "",
             )
 
         print("[INFO] Creating requisites relationships.")

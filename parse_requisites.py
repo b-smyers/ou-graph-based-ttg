@@ -88,6 +88,15 @@ def sanitize_requisite(obj: dict) -> dict:
     raise AssertionError("Unreachable")
 
 
+def convert_string_to_list(text):
+    # Check if the string is empty or only contains whitespace
+    if not text.strip():
+        return []
+
+    # Split by comma and strip whitespace from each resulting item
+    return [item.strip() for item in text.split(",")]
+
+
 # --------------------
 # LLM Parsing
 # --------------------
@@ -250,6 +259,10 @@ def main():
             # Explicit field mapping
             name = c.get("title")
             raw_req = c.get("requisite")
+            component = c.get("component")
+            bricks = convert_string_to_list(c.get("bricks"))
+            min_credits = c.get("minCreditHours")
+            max_credits = c.get("maxCreditHours")
 
             if not name or not course_code:
                 print(
@@ -266,6 +279,10 @@ def main():
                     "code": course_code,
                     "requisite_string": raw_req,
                     "requisite": parse_requisite(raw_req),
+                    "component": component,
+                    "bricks": bricks,
+                    "min_credits": min_credits,
+                    "max_credits": max_credits,
                 }
                 processed_courses.append(course_obj)
                 existing_course_codes.add(course_code)
@@ -290,6 +307,10 @@ def main():
                     "code": course_code,
                     "requisite_string": raw_req,
                     "requisite": {"type": "NONE"},
+                    "component": component,
+                    "bricks": bricks,
+                    "min_credits": min_credits,
+                    "max_credits": max_credits,
                 }
                 processed_courses.append(course_obj)
                 existing_course_codes.add(course_code)
@@ -321,7 +342,7 @@ def main():
             print("       Resume by running the same command again.")
             sys.exit(130)  # Standard exit code for SIGINT
         else:
-            print(f"\n[SUCCESS] All courses processed and saved to {output_path}")
+            print(f"\n[INFO] All courses processed and saved to {output_path}")
 
     except Exception as e:
         print(f"\n[ERROR] Failed to save output file: {e}", file=sys.stderr)
