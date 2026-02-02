@@ -32,7 +32,9 @@ def neo4j_session(neo4j_driver):
 @pytest.fixture
 def sample_program():
     """Load sample program for tests from live database."""
-    sample_path = Path(__file__).parent.parent / "data" / "sample.bs7241.json"
+    sample_path = (
+        Path(__file__).parent.parent / "data" / "programs" / "program.bs7241.json"
+    )
     with open(sample_path, "r") as f:
         return json.load(f)
 
