@@ -148,7 +148,8 @@ def create_gpa(tx, gpa):
         """
         CREATE (cr:GPA {
             name: $name,
-            uuid: $uuid
+            uuid: $uuid,
+            gpa: $gpa
         })
         """,
         name=f"{gpa} GPA",
