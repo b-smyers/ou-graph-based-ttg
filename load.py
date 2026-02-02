@@ -43,6 +43,7 @@ def create_course(tx, course):
     requisite_string = course.get("requisite_string", "") or ""
     component = course.get("component", "") or ""
     bricks = course.get("bricks", []) or []
+    pattern = course.get("pattern", "") or ""
     min_credits = course.get("min_credits", "") or ""
     max_credits = course.get("max_credits", "") or ""
     course_uuid = str(uuid.uuid4())
@@ -55,6 +56,7 @@ def create_course(tx, course):
             requisite_string: $requisite_string,
             component: $component,
             bricks: $bricks,
+            pattern: $pattern,
             min_credits: $min_credits,
             max_credits: $max_credits
         })
@@ -65,6 +67,7 @@ def create_course(tx, course):
         requisite_string=requisite_string,
         component=component,
         bricks=bricks,
+        pattern=pattern,
         min_credits=min_credits,
         max_credits=max_credits,
     )
