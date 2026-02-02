@@ -598,6 +598,49 @@ def check_prerequisites_satisfied(
     return True, None
 
 
+def pattern_allows(pattern, is_spring, year):
+    """Return True if a course with `pattern` may be scheduled in the term.
+
+    - `is_spring`: True for spring semesters, False for fall semesters
+    - `year`: integer year (e.g., 2025)
+    """
+    if not pattern:
+        return True
+
+    p = pattern.lower()
+    # summer terms are not supported by the scheduler; treat summer-only as disallowed
+    if p == "summer":
+        return False
+    if p == "fall_and_spring":
+        return True
+    if p == "fall":
+        return not is_spring
+    if p == "spring":
+        return is_spring
+    if p == "fall_even":
+        return (not is_spring) and (year % 2 == 0)
+    if p == "fall_odd":
+        return (not is_spring) and (year % 2 == 1)
+    if p == "spring_even":
+        return is_spring and (year % 2 == 0)
+    if p == "spring_odd":
+        return is_spring and (year % 2 == 1)
+    if p == "summer_even":
+        return False
+    if p == "summer_odd":
+        return False
+    if p == "irregular":
+        # allowed any time, but caller may choose to warn
+        return True
+    if p == "arranged":
+        return True
+    if p == "deactivated":
+        return False
+
+    # Unknown patterns default to allowed
+    return True
+
+
 class ScheduleState:
     """Tracks the state of a semester schedule."""
 
@@ -659,6 +702,30 @@ def generate_semesters(
 
             # Check if we can add this course
             course_node = course_by_code[course_code]
+
+            # Enforce course offering pattern
+            pattern = None
+            try:
+                pattern = course_node.get("pattern")
+            except Exception:
+                pattern = None
+
+            allowed = pattern_allows(pattern, is_spring, current_year)
+            if not allowed:
+                # If course is explicitly deactivated or only offered in unsupported
+                # summer terms, log and discard; otherwise skip this semester.
+                p = (pattern or "").lower()
+                if p == "deactivated":
+                    logger.warn(
+                        f"Course deactivated, removing from schedule: {course_code}"
+                    )
+                    courses_to_schedule.discard(course_code)
+                else:
+                    # Not allowed this term — try in a future term
+                    logger.debug(
+                        f"Skipping {course_code}; pattern='{pattern}' not allowed this term"
+                    )
+                continue
             course_credits = course_node.get("min_credits", 0)
             if isinstance(course_credits, str):
                 try:
@@ -811,6 +878,7 @@ def main(program_path, credits_per_semester, driver):
                     semester_credits += cred
             total_credits += semester_credits
         logger.info(f"Total credits scheduled: {total_credits}")
+        return semesters
 
 
 if __name__ == "__main__":
