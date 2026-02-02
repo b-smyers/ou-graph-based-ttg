@@ -1,12 +1,10 @@
-# main.py: Finds the longest chain of required courses in the graph
-
 from dotenv import load_dotenv
-load_dotenv()
-
 import os
 import sys
 from neo4j import GraphDatabase
 from typing import List
+
+load_dotenv()
 
 # --------------------
 # Config
@@ -24,12 +22,13 @@ if len(sys.argv) < 2:
 
 COURSE_CODES = sys.argv[1:]
 
-driver = GraphDatabase.driver(URI, auth=AUTH)
+driver = GraphDatabase.driver(URI, auth=AUTH)  # type: ignore
 driver.verify_connectivity()
 
 # --------------------
 # Core logic
 # --------------------
+
 
 def find_longest_chain(tx, course_codes: List[str]):
     """
@@ -62,16 +61,15 @@ def find_longest_chain(tx, course_codes: List[str]):
 
     return record["course_chain"], record["length"]
 
+
 # --------------------
 # Entry point
 # --------------------
 
+
 def main():
     with driver.session() as session:
-        chain, length = session.execute_read(
-            find_longest_chain,
-            COURSE_CODES
-        )
+        chain, length = session.execute_read(find_longest_chain, COURSE_CODES)
 
     if length == 0:
         print("No prerequisite chains found.")
@@ -80,6 +78,7 @@ def main():
     print("Longest prerequisite chain:")
     print(" → ".join(chain))
     print(f"Length: {length}")
+
 
 if __name__ == "__main__":
     main()
