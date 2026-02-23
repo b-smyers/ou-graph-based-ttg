@@ -187,14 +187,14 @@ def main():
     # Register signal handler
     signal.signal(signal.SIGINT, signal_handler)
 
-    programs_path = sys.argv[1] if len(sys.argv) >= 2 else None
+    courses_path = sys.argv[1] if len(sys.argv) >= 2 else None
     output_path = sys.argv[2] if len(sys.argv) >= 3 else None
 
-    if len(sys.argv) < 2 or programs_path is None or output_path is None:
-        print("Usage: parse_programs.py <input.json> [output.json]", file=sys.stderr)
+    if len(sys.argv) < 2 or courses_path is None or output_path is None:
+        print("Usage: parse_courses.py <input.json> [output.json]", file=sys.stderr)
         sys.exit(1)
 
-    with open(programs_path, "r", encoding="utf-8") as f:
+    with open(courses_path, "r", encoding="utf-8") as f:
         raw_courses = json.load(f)
 
     if not isinstance(raw_courses, list):

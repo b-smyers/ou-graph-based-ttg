@@ -28,3 +28,5 @@ uv run load.py data/catalog.sample.json
 ```bash
 uv run longest_chain.py "CS 2401"
 ```
+
+11:55

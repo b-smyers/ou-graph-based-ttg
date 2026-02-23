@@ -36,15 +36,14 @@ def find_longest_chain(tx, course_codes: List[str]):
     """
 
     query = """
-    MATCH (start:Course)
+    MATCH (start:COURSE)
     WHERE start.code IN $codes
 
-    // Traverse through ReqGroup transparently, but only count Course nodes
-    MATCH path = (start)-[:REQUIRES*]->(end:Course)
+    MATCH path = (start)-[:REQUIRES*]->(end:COURSE)
 
     WITH
         path,
-        [n IN nodes(path) WHERE n:Course | n.code] AS course_chain
+        [n IN nodes(path) WHERE n:COURSE | n.code] AS course_chain
 
     RETURN
         course_chain,
