@@ -38,6 +38,23 @@ class RequirementType(str, Enum):
     OTHER = "OTHER"
 
 
+class OfferingPattern(str, Enum):
+    SUMMER = "summer"
+    FALL_AND_SPRING = "fall_and_spring"
+    FALL = "fall"
+    SPRING = "spring"
+    FALL_EVEN = "fall_even"
+    FALL_ODD = "fall_odd"
+    SPRING_EVEN = "spring_even"
+    SPRING_ODD = "spring_odd"
+    SUMMER_EVEN = "summer_even"
+    SUMMER_ODD = "summer_odd"
+    IRREGULAR = "irregular"
+    ARRANGED = "arranged"
+    DEACTIVATED = "deactivated"
+    UNKNOWN = "unknown"  # default for missing/invalid patterns
+
+
 T = TypeVar("T", bound=RequirementType)
 
 
@@ -169,6 +186,8 @@ class Config(BaseModel):
     gpa: float
     level: Level
     credits_per_semester: int
+    start_year: int
+    start_term: Literal["fall", "spring"]
 
 
 class ParsedCourse(BaseModel):
@@ -180,7 +199,7 @@ class ParsedCourse(BaseModel):
     bricks: List[str]
     min_credits: float
     max_credits: float
-    pattern: str
+    pattern: OfferingPattern
 
 
 class Foundations(BaseModel):
@@ -327,7 +346,7 @@ def parse_requirements(requirement_list) -> List[Requirement]:
     return parsed
 
 
-def pattern_allows(pattern, is_spring, year):
+def pattern_allows(pattern: OfferingPattern, is_spring: bool, year: int):
     """Return True if a course with `pattern` may be scheduled in the term.
 
     - `is_spring`: True for spring semesters, False for fall semesters
@@ -338,32 +357,32 @@ def pattern_allows(pattern, is_spring, year):
 
     p = pattern.lower()
     # summer terms are not supported by the scheduler; treat summer-only as disallowed
-    if p == "summer":
+    if p == OfferingPattern.SUMMER:
         return False
-    if p == "fall_and_spring":
+    if p == OfferingPattern.FALL_AND_SPRING:
         return True
-    if p == "fall":
+    if p == OfferingPattern.FALL:
         return not is_spring
-    if p == "spring":
+    if p == OfferingPattern.SPRING:
         return is_spring
-    if p == "fall_even":
+    if p == OfferingPattern.FALL_EVEN:
         return (not is_spring) and (year % 2 == 0)
-    if p == "fall_odd":
+    if p == OfferingPattern.FALL_ODD:
         return (not is_spring) and (year % 2 == 1)
-    if p == "spring_even":
+    if p == OfferingPattern.SPRING_EVEN:
         return is_spring and (year % 2 == 0)
-    if p == "spring_odd":
+    if p == OfferingPattern.SPRING_ODD:
         return is_spring and (year % 2 == 1)
-    if p == "summer_even":
+    if p == OfferingPattern.SUMMER_EVEN:
         return False
-    if p == "summer_odd":
+    if p == OfferingPattern.SUMMER_ODD:
         return False
-    if p == "irregular":
+    if p == OfferingPattern.IRREGULAR:
         # allowed any time, but caller may choose to warn
         return True
-    if p == "arranged":
+    if p == OfferingPattern.ARRANGED:
         return True
-    if p == "deactivated":
+    if p == OfferingPattern.DEACTIVATED:
         return False
 
     # Unknown patterns default to allowed
@@ -670,15 +689,15 @@ def main(config: Config):
     ) -> List[List[str]]:
         """
         Sorts required courses into semesters using raw prerequisite trees
-        (no simplification, no placements, no completed courses).
+        and course offering patterns. Returns a list of lists, where each
+        sublist corresponds to a semester in chronological order.
         """
 
-        # --- Step 0: Remove already completed courses from the set to schedule ---
+        # --- Step 0: Remove already completed courses ---
         completed_set = set(config.completed_course_work)
         all_required = all_required - completed_set
-        logger.debug(f"All required after removing completed: {sorted(all_required)}")
 
-        # --- Step 1: Build dependency graph by scanning raw prerequisite trees ---
+        # --- Step 1: Build dependency graph (raw prerequisites) ---
         prereq_map: Dict[str, Set[str]] = {}
         reverse_map: Dict[str, Set[str]] = {}
 
@@ -688,48 +707,74 @@ def main(config: Config):
                 logger.error(f"Course {course} not found in DB - skipping")
                 continue
 
-            # Get all course codes mentioned in the prerequisite tree (raw, unsimplified)
-            # course_obj.requisite is typically a list of requirement nodes
+            # Collect all course codes from the raw prerequisite tree
             all_prereq_codes = collect_all_course_codes(course_obj.requisite)
 
-            # Keep only those that are also in all_required (and not already completed)
+            # Keep only those that are also in all_required
             prereq_set = {c for c in all_prereq_codes if c in all_required}
             prereq_map[course] = prereq_set
-
-            logger.debug(
-                f"Course {course} - raw prerequisites (from all_required): {sorted(prereq_set)}"
-            )
 
             for prereq in prereq_set:
                 reverse_map.setdefault(prereq, set()).add(course)
 
-        # --- Step 2: Kahn's algorithm with grouping by semester ---
+        # --- Step 2: Initialize in-degree and available set ---
         in_degree = {course: len(prereq_map[course]) for course in all_required}
-        logger.debug(f"Initial in‑degrees: {in_degree}")
 
-        queue = deque([c for c in all_required if in_degree[c] == 0])
-        logger.debug(f"Initial queue (semester 1 candidates): {sorted(queue)}")
+        # Courses that are ready to be taken (all prerequisites satisfied)
+        available = {c for c in all_required if in_degree[c] == 0}
 
-        semesters = []
-        semester_num = 1
-        while queue:
-            current_semester = list(queue)
-            semesters.append(current_semester)
-            logger.debug(f"Semester {semester_num}: {sorted(current_semester)}")
-            queue.clear()
+        # Remaining courses to schedule
+        remaining = set(all_required)
+        semesters = []  # will hold lists of courses per semester
 
-            for course in current_semester:
-                for dependent in reverse_map.get(course, []):
-                    in_degree[dependent] -= 1
-                    if in_degree[dependent] == 0:
-                        queue.append(dependent)
-            semester_num += 1
+        # --- Step 3: Simulate semesters ---
+        year = config.start_year
+        is_spring = config.start_term == "spring"
 
-        # --- Step 3: Check for cycles ---
-        assigned = sum(len(sem) for sem in semesters)
-        if assigned != len(all_required):
-            remaining = [c for c in all_required if in_degree.get(c, 0) > 0]
-            raise ValueError(f"Cycle detected among courses: {remaining}")
+        while remaining:
+            # Which available courses are offered this semester?
+            offered_now = []
+            for course in available:
+                course_obj = get_course(course)
+                if course_obj and pattern_allows(course_obj.pattern, is_spring, year):
+                    offered_now.append(course)
+
+            if offered_now:
+                # Place them this semester
+                semesters.append(offered_now)
+
+                # Remove them from available and remaining
+                for course in offered_now:
+                    available.remove(course)
+                    remaining.remove(course)
+
+                    # Update dependents
+                    for dependent in reverse_map.get(course, []):
+                        in_degree[dependent] -= 1
+                        if in_degree[dependent] == 0:
+                            available.add(dependent)
+            else:
+                # No courses can be taken this semester – just advance time
+                logger.debug(
+                    f"Semester {year} {'Spring' if is_spring else 'Fall'}: no courses offered"
+                )
+
+            # Safety check: if available is empty but courses remain, something is wrong
+            if not available and remaining:
+                raise RuntimeError(
+                    f"No courses available to take, but {len(remaining)} courses remain unscheduled. "
+                    "Possible cycle or missing prerequisite."
+                )
+
+            # Advance to next semester
+            if is_spring:
+                # Spring -> next Fall (same calendar year)
+                is_spring = False
+                # year stays the same (Fall of same year)
+            else:
+                # Fall -> next Spring (year+1)
+                is_spring = True
+                year += 1
 
         return semesters
 
@@ -798,6 +843,17 @@ def main(config: Config):
     for i, semester in enumerate(semesters, 1):
         print(f"Semester {i}: {sorted(semester)}")
 
+        start_year = config.start_year + (i - 1) // 2
+        is_spring = (config.start_term == "spring") if i == 1 else (i % 2 == 0)
+        for course in semester:
+            course_obj = get_course(course)
+            if course_obj and not pattern_allows(
+                course_obj.pattern, is_spring, start_year
+            ):
+                logger.error(
+                    f"Course {course} cannot be taken in Semester {i} ({'Spring' if is_spring else 'Fall'} {start_year}) due to offering pattern {course_obj.pattern}"
+                )
+
     # print("\nSimplified course requirement tree:\n")
     # print(json.dumps(simplified_tree.model_dump(mode="json"), indent=2))
 
@@ -855,12 +911,14 @@ if __name__ == "__main__":
         ),
         completed_course_work=completed_courses,
         placements=[
-            Placement(subject="Math", level="2"),
+            Placement(subject="Math", level="1"),
             Placement(subject="Computer Science", level="3"),
         ],
         gpa=4.0,
         level=get_level(completed_courses),
         credits_per_semester=credits_per_semester,
+        start_year=2026,
+        start_term="fall",
     )
     courses_raw = load_json("data/courses/courses.parsed.json")
     for course in courses_raw:
@@ -875,7 +933,7 @@ if __name__ == "__main__":
                 bricks=course["bricks"],
                 min_credits=course["min_credits"],
                 max_credits=course["max_credits"],
-                pattern=course["pattern"],
+                pattern=OfferingPattern(course["pattern"]),
             )
         )
     main(config)
