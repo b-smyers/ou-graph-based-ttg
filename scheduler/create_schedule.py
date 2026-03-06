@@ -1,6 +1,5 @@
 from __future__ import annotations
 from enum import Enum
-from collections import deque
 from functools import total_ordering
 import json
 import re
@@ -8,7 +7,6 @@ import sys
 import os
 from typing import (
     Annotated,
-    ClassVar,
     Dict,
     Generic,
     List,
@@ -21,21 +19,6 @@ from typing import (
 )
 from pydantic import BaseModel, Field
 from logger import logger
-# import db
-
-
-class RequirementType(str, Enum):
-    NONE = "NONE"
-    PERMISSION = "PERMISSION"
-    LEVEL = "LEVEL"
-    PLACEMENT = "PLACEMENT"
-    GPA = "GPA"
-    COURSE = "COURSE"
-    OR = "OR"
-    AND = "AND"
-    CREDITS_FROM = "CREDITS_FROM"
-    CHOOSE_N = "CHOOSE_N"
-    OTHER = "OTHER"
 
 
 class OfferingPattern(str, Enum):
@@ -55,21 +38,26 @@ class OfferingPattern(str, Enum):
     UNKNOWN = "unknown"  # default for missing/invalid patterns
 
 
+class RequirementType(str, Enum):
+    NONE = "NONE"
+    PERMISSION = "PERMISSION"
+    LEVEL = "LEVEL"
+    PLACEMENT = "PLACEMENT"
+    GPA = "GPA"
+    COURSE = "COURSE"
+    OR = "OR"
+    AND = "AND"
+    CREDITS_FROM = "CREDITS_FROM"
+    CHOOSE_N = "CHOOSE_N"
+    OTHER = "OTHER"
+
+
 T = TypeVar("T", bound=RequirementType)
 
 
+# Base requirement types
 class BaseRequirement(BaseModel, Generic[T]):
     type: T
-
-
-class Or(BaseRequirement):
-    type: Literal[RequirementType.OR] = RequirementType.OR
-    requirements: list[Requirement]
-
-
-class And(BaseRequirement):
-    type: Literal[RequirementType.AND] = RequirementType.AND
-    requirements: list[Requirement]
 
 
 class Course(BaseRequirement):
@@ -137,6 +125,17 @@ class Empty(BaseRequirement):
     type: Literal[RequirementType.NONE] = RequirementType.NONE
 
 
+# Recursive requirement types
+class Or(BaseRequirement):
+    type: Literal[RequirementType.OR] = RequirementType.OR
+    requirements: list[Requirement]
+
+
+class And(BaseRequirement):
+    type: Literal[RequirementType.AND] = RequirementType.AND
+    requirements: list[Requirement]
+
+
 class CreditsFrom(BaseRequirement):
     type: Literal[RequirementType.CREDITS_FROM] = RequirementType.CREDITS_FROM
     credits_required: float
@@ -200,53 +199,6 @@ class ParsedCourse(BaseModel):
     min_credits: float
     max_credits: float
     pattern: OfferingPattern
-
-
-class Foundations(BaseModel):
-    WS: int = 0
-    WS_required: ClassVar[Literal[3]] = 3
-    AW: int = 0
-    AW_required: ClassVar[Literal[3]] = 3
-    QR: int = 0
-    QR_required: ClassVar[Literal[3]] = 3
-    IE: int = 0
-    IE_required: ClassVar[Literal[2]] = 2
-
-
-class Pillars(BaseModel):
-    HTC: int = 0
-    HTC_required: ClassVar[Literal[3]] = 3
-    HA: int = 0
-    HA_required: ClassVar[Literal[3]] = 3
-    NS: int = 0
-    NS_required: ClassVar[Literal[3]] = 3
-    SBS: int = 0
-    SBS_required: ClassVar[Literal[3]] = 3
-
-
-class Arches(BaseModel):
-    CSW: int = 0
-    CSW_required: ClassVar[Literal[3]] = 3
-    NW: int = 0
-    NW_required: ClassVar[Literal[3]] = 3
-    CNW: int = 0
-    CNW_required: ClassVar[Literal[3]] = 3
-
-
-class Bridges(BaseModel):
-    SL: int = 0
-    SL_required: ClassVar[Literal[1]] = 1
-    ER: int = 0
-    ER_required: ClassVar[Literal[1]] = 1
-    DP: int = 0
-    DP_required: ClassVar[Literal[1]] = 1
-    LD: int = 0
-    LD_required: ClassVar[Literal[1]] = 1
-
-
-class Capstone(BaseModel):
-    CAP: int = 0
-    CAP_required: ClassVar[Literal[2]] = 2
 
 
 def parse_args(argv):
@@ -389,38 +341,6 @@ def pattern_allows(pattern: OfferingPattern, is_spring: bool, year: int):
     return True
 
 
-def find_longest_chain(tx, course_codes: List[str], config: Config):
-    """
-    Returns the longest prerequisite chain (as course codes) among the given courses.
-    """
-
-    query = """
-    MATCH (start:Course)
-    WHERE start.code IN $codes
-
-    // Traverse through ReqGroup transparently, but only count Course nodes
-    MATCH path = (start)-[:REQUIRES*]->(end:Course)
-
-    WITH
-        path,
-        [n IN nodes(path) WHERE n:Course | n.code] AS course_chain
-
-    RETURN
-        course_chain,
-        size(course_chain) AS length
-    ORDER BY length DESC
-    LIMIT 1
-    """
-
-    result = tx.run(query, codes=course_codes)
-    record = result.single()
-
-    if record is None:
-        return [], 0
-
-    return record["course_chain"], record["length"]
-
-
 courses = []
 
 
@@ -458,7 +378,12 @@ def extract_course_codes(req: Requirement) -> Set[str]:
     if isinstance(req, Course):
         codes.add(req.course)
     # All composite types (And, Or, CreditsFrom, ChooseN) have a 'requirements' list
-    if hasattr(req, "requirements") and isinstance(req.requirements, list):
+    if (
+        isinstance(req, Or)
+        or isinstance(req, And)
+        or isinstance(req, CreditsFrom)
+        or isinstance(req, ChooseN)
+    ):
         for child in req.requirements:
             codes.update(extract_course_codes(child))
     return codes
@@ -686,7 +611,7 @@ def main(config: Config):
     def schedule_courses(
         all_required: Set[str],
         config: Config,
-    ) -> List[List[str]]:
+    ) -> List[List[ParsedCourse]]:
         """
         Sorts required courses into semesters using raw prerequisite trees
         and course offering patterns. Returns a list of lists, where each
@@ -776,8 +701,24 @@ def main(config: Config):
                 is_spring = True
                 year += 1
 
-        return semesters
+        # --- Step 4: Convert course codes to course objects for final output ---
+        final_semesters = []
+        for sem in semesters:
+            sem_courses = []
+            for code in sem:
+                course_obj = get_course(code)
+                if course_obj:
+                    sem_courses.append(course_obj)
+                else:
+                    logger.error(f"Course {code} not found in DB during final assembly")
+            final_semesters.append(sem_courses)
 
+        return final_semesters
+
+    # Simplify requirement tree of remaining coursework by removing-
+    # courses already satisified by subrequirement courses
+
+    # Required courses are courses you will absolutely take
     initial_courses = [
         course.course for course in required_courses
     ]  # e.g., ['ET 1500', 'CS 2400', ...]
@@ -833,15 +774,33 @@ def main(config: Config):
     print("\n=== Final set of all required courses ===")
     print(sorted(all_required.difference(initial_courses)))
 
-    # Schedule the courses into semesters
+    # Schedule the required courses into semesters
     semesters = schedule_courses(
         all_required,
         config,
     )
 
+    # Simplify the remaining coursework by marking off courses that are now satisfied by the scheduled required courses.
+    all_completed = list(set(config.completed_course_work) | all_required)
+    simplified_remaining = []
+    for req in remaining_coursework:
+        simplified = simplify_requirement(
+            req,
+            config.gpa,
+            config.placements,
+            all_completed,
+            config.level,
+        )
+        if simplified.type != RequirementType.NONE:
+            simplified_remaining.append(simplified)
+
+    print("\n=== Remaining unsatisfied coursework ===")
+    for req in remaining_coursework:
+        print(f"{req.type}")
+
     print("\n=== Proposed semester schedule ===")
     for i, semester in enumerate(semesters, 1):
-        print(f"Semester {i}: {sorted(semester)}")
+        print(f"Semester {i}: {[course.code for course in semester]}")
 
         start_year = config.start_year + (i - 1) // 2
         is_spring = (config.start_term == "spring") if i == 1 else (i % 2 == 0)
@@ -854,13 +813,6 @@ def main(config: Config):
                     f"Course {course} cannot be taken in Semester {i} ({'Spring' if is_spring else 'Fall'} {start_year}) due to offering pattern {course_obj.pattern}"
                 )
 
-    # print("\nSimplified course requirement tree:\n")
-    # print(json.dumps(simplified_tree.model_dump(mode="json"), indent=2))
-
-    # Simplify requirement tree of remaining coursework by removing-
-    # courses already satisified by subrequirement courses
-
-    # Required courses are courses you will absolutely take
     # Mark off bricks satisfied by these required courses
     for code in all_required:
         db_course = get_course(code)
