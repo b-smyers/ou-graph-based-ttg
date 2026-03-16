@@ -1,204 +1,37 @@
 from __future__ import annotations
-from enum import Enum
-from functools import total_ordering
+from ortools.sat.python import cp_model
 import json
 import re
 import sys
 import os
 from typing import (
-    Annotated,
     Dict,
-    Generic,
     List,
     Literal,
-    Optional,
     Set,
     Tuple,
-    TypeVar,
-    Union,
 )
-from pydantic import BaseModel, Field
+from scheduling_types import (
+    BrickType,
+    Requirement,
+    RequirementType,
+    OfferingPattern,
+    Course,
+    GPA,
+    Level,
+    Placement,
+    Permission,
+    Other,
+    Empty,
+    Or,
+    And,
+    CreditsFrom,
+    ChooseN,
+    Program,
+    Config,
+    ParsedCourse,
+)
 from logger import logger
-
-
-class OfferingPattern(str, Enum):
-    SUMMER = "summer"
-    FALL_AND_SPRING = "fall_and_spring"
-    FALL = "fall"
-    SPRING = "spring"
-    FALL_EVEN = "fall_even"
-    FALL_ODD = "fall_odd"
-    SPRING_EVEN = "spring_even"
-    SPRING_ODD = "spring_odd"
-    SUMMER_EVEN = "summer_even"
-    SUMMER_ODD = "summer_odd"
-    IRREGULAR = "irregular"
-    ARRANGED = "arranged"
-    DEACTIVATED = "deactivated"
-    UNKNOWN = "unknown"  # default for missing/invalid patterns
-
-
-class RequirementType(str, Enum):
-    NONE = "NONE"
-    PERMISSION = "PERMISSION"
-    LEVEL = "LEVEL"
-    PLACEMENT = "PLACEMENT"
-    GPA = "GPA"
-    COURSE = "COURSE"
-    OR = "OR"
-    AND = "AND"
-    CREDITS_FROM = "CREDITS_FROM"
-    CHOOSE_N = "CHOOSE_N"
-    OTHER = "OTHER"
-
-
-T = TypeVar("T", bound=RequirementType)
-
-
-# Base requirement types
-class BaseRequirement(BaseModel, Generic[T]):
-    type: T
-
-
-class Course(BaseRequirement):
-    type: Literal[RequirementType.COURSE] = RequirementType.COURSE
-    course: str
-    timing: Literal["COMPLETED", "CONCURRENT", "CONCURRENT_OR_COMPLETED"]
-
-
-class GPA(BaseRequirement):
-    type: Literal[RequirementType.GPA] = RequirementType.GPA
-    gpa: float
-
-
-@total_ordering
-class Placement(BaseRequirement):
-    type: Literal[RequirementType.PLACEMENT] = RequirementType.PLACEMENT
-    subject: str
-    level: str
-
-    def _rank(self) -> int:
-        if self.level.isdigit():
-            return int(self.level)
-        return 0  # DV / unknown
-
-    def __lt__(self, other: "Placement") -> bool:
-        if not isinstance(other, Placement):
-            return NotImplemented
-        return self._rank() < other._rank()
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Placement):
-            return False
-        return self._rank() == other._rank()
-
-
-class Permission(BaseRequirement):
-    type: Literal[RequirementType.PERMISSION] = RequirementType.PERMISSION
-    authority: str
-
-
-@total_ordering
-class Level(BaseRequirement):
-    type: Literal[RequirementType.LEVEL] = RequirementType.LEVEL
-    level: Literal["freshman", "sophomore", "junior", "senior"]
-
-    _level_order = {"freshman": 0, "sophomore": 1, "junior": 2, "senior": 3}
-
-    def __eq__(self, other):
-        if not isinstance(other, Level):
-            return NotImplemented
-        return self.level == other.level
-
-    def __lt__(self, other):
-        if not isinstance(other, Level):
-            return NotImplemented
-        return self._level_order[self.level] < self._level_order[other.level]
-
-
-class Other(BaseRequirement):
-    type: Literal[RequirementType.OTHER] = RequirementType.OTHER
-    other: str
-
-
-class Empty(BaseRequirement):
-    type: Literal[RequirementType.NONE] = RequirementType.NONE
-
-
-# Recursive requirement types
-class Or(BaseRequirement):
-    type: Literal[RequirementType.OR] = RequirementType.OR
-    requirements: list[Requirement]
-
-
-class And(BaseRequirement):
-    type: Literal[RequirementType.AND] = RequirementType.AND
-    requirements: list[Requirement]
-
-
-class CreditsFrom(BaseRequirement):
-    type: Literal[RequirementType.CREDITS_FROM] = RequirementType.CREDITS_FROM
-    credits_required: float
-    requirements: List[Requirement]
-
-
-class ChooseN(BaseRequirement):
-    type: Literal[RequirementType.CHOOSE_N] = RequirementType.CHOOSE_N
-    choose: int
-    requirements: List[Requirement]
-
-
-Requirement = Annotated[
-    Union[
-        Or,
-        And,
-        Course,
-        GPA,
-        Placement,
-        Permission,
-        Level,
-        Other,
-        Empty,
-        CreditsFrom,
-        ChooseN,
-    ],
-    Field(discriminator="type"),
-]
-
-
-class Program(BaseModel):
-    catalog_name: str
-    catalog_year: int
-    catalog_archived: bool
-    program_type: str
-    program_name: str
-    program_link: str
-    credits: int
-    code: str
-    requisite: List[Requirement]
-
-
-class Config(BaseModel):
-    program: Program
-    completed_course_work: List[str]
-    placements: List[Placement]
-    gpa: float
-    level: Level
-    credits_per_semester: int
-    start_year: int
-    start_term: Literal["fall", "spring"]
-
-
-class ParsedCourse(BaseModel):
-    name: str
-    code: str
-    requisite_string: Optional[str]
-    requisite: List[Requirement]
-    component: str
-    bricks: List[str]
-    min_credits: float
-    max_credits: float
-    pattern: OfferingPattern
 
 
 def parse_args(argv):
@@ -341,7 +174,7 @@ def pattern_allows(pattern: OfferingPattern, is_spring: bool, year: int):
     return True
 
 
-courses = []
+courses: List[ParsedCourse] = []
 
 
 def get_course(code) -> ParsedCourse | None:
@@ -414,6 +247,229 @@ def collect_all_course_codes(req) -> Set[str]:
             codes.update(collect_all_course_codes(child))
 
     return codes
+
+
+def schedule_remaining_with_ortools(
+    fixed_semesters: List[List[ParsedCourse]],
+    remaining_requirements: List[Requirement],
+    config: Config,
+    all_courses: List[ParsedCourse],
+    start_year: int,
+    start_term: Literal["fall", "spring"],
+    credits_per_semester: int,
+    max_additional_semesters: int = 8,
+) -> List[List[ParsedCourse]]:
+    """
+    Use OR-Tools CP-SAT to assign remaining courses to semesters.
+    Returns a merged schedule (fixed + chosen remaining courses).
+    """
+    CREDIT_SCALE = 10  # factor to convert float credits to integers
+
+    # --- Helper: get course by code (already in global scope) ---
+    # (uses existing get_course function)
+
+    # --- 1. Collect all candidate courses from remaining requirements ---
+    candidate_codes = set()
+    for req in remaining_requirements:
+        candidate_codes.update(extract_course_codes(req))
+
+    # Remove any courses already in fixed schedule
+    fixed_codes = {c.code for sem in fixed_semesters for c in sem}
+    candidate_codes -= fixed_codes
+
+    # Build mapping from code to ParsedCourse and pre‑compute scaled credits
+    candidate_courses = {}
+    scaled_credits = {}  # code -> integer (credits * CREDIT_SCALE)
+    for code in candidate_codes:
+        course = get_course(code)
+        if course is None:
+            logger.warn(f"Candidate course {code} not found in DB; skipping")
+        else:
+            candidate_courses[code] = course
+            scaled_credits[code] = int(course.min_credits * CREDIT_SCALE + 0.5)
+
+    if not candidate_courses:
+        logger.info("No remaining courses to schedule.")
+        return fixed_semesters
+
+    # --- 2. Fixed schedule data ---
+    num_fixed_semesters = len(fixed_semesters)
+    fixed_credits = [0.0] * num_fixed_semesters
+    fixed_semester_index = {}  # code -> semester index (0-based)
+    for i, sem in enumerate(fixed_semesters):
+        for course in sem:
+            fixed_semester_index[course.code] = i
+            fixed_credits[i] += course.min_credits
+
+    # --- 3. Determine earliest possible semester for each candidate course ---
+    # based on fixed prerequisites
+    earliest_semester = {}
+    for code, course in candidate_courses.items():
+        # Collect all prerequisite course codes from original (unsimplified) tree
+        prereq_codes = collect_all_course_codes(course.requisite)
+        # Only consider those that are in the fixed schedule
+        fixed_prereq_sems = [
+            fixed_semester_index[p] for p in prereq_codes if p in fixed_semester_index
+        ]
+        if fixed_prereq_sems:
+            earliest = max(fixed_prereq_sems) + 1
+        else:
+            earliest = 0
+        earliest_semester[code] = earliest
+
+    # --- 4. Planning horizon ---
+    horizon = num_fixed_semesters + max_additional_semesters
+
+    # --- 5. Create CP model ---
+    model = cp_model.CpModel()
+
+    # Variables: x[code][s] for s in [earliest..horizon-1]
+    x = {}
+    for code in candidate_courses:
+        earliest = earliest_semester[code]
+        for s in range(earliest, horizon):
+            x[code, s] = model.NewBoolVar(f"x_{code}_s{s}")
+
+    # --- 6. Constraints ---
+
+    # Each course at most once
+    for code in candidate_courses:
+        vars_for_code = [
+            x[code, s]
+            for s in range(earliest_semester[code], horizon)
+            if (code, s) in x
+        ]
+        if vars_for_code:
+            model.Add(sum(vars_for_code) <= 1)
+
+    # Credit limit per semester (using scaled integers)
+    target_credits_scaled = credits_per_semester * CREDIT_SCALE
+    for s in range(horizon):
+        # fixed credits for this semester (scaled)
+        fixed_scaled = (
+            int(fixed_credits[s] * CREDIT_SCALE + 0.5) if s < num_fixed_semesters else 0
+        )
+        credit_vars = []
+        for code in candidate_courses:
+            if (code, s) in x:
+                credit_vars.append(scaled_credits[code] * x[code, s])
+        if credit_vars:
+            model.Add(sum(credit_vars) + fixed_scaled <= target_credits_scaled)
+
+    # Prerequisite constraints among candidate courses
+    for code_c, course_c in candidate_courses.items():
+        prereq_codes = collect_all_course_codes(course_c.requisite)
+        for code_p in prereq_codes:
+            if code_p not in candidate_courses:
+                continue
+            # For each semester s where c might be taken, ensure p is taken in some t < s
+            for s in range(earliest_semester[code_c], horizon):
+                if (code_c, s) not in x:
+                    continue
+                p_possible = [
+                    x[code_p, t]
+                    for t in range(earliest_semester[code_p], s)
+                    if (code_p, t) in x
+                ]
+                if p_possible:
+                    # If c is taken at s, then at least one of p_possible must be true
+                    model.AddBoolOr(p_possible + [x[code_c, s].Not()])
+
+    # Offering pattern constraints
+    for s in range(horizon):
+        year_offset = s // 2
+        year = start_year + year_offset
+        is_spring = (start_term == "spring") if s % 2 == 0 else (s % 2 == 1)
+        for code in candidate_courses:
+            if (code, s) in x:
+                course = candidate_courses[code]
+                if not pattern_allows(course.pattern, is_spring, year):
+                    model.Add(x[code, s] == 0)
+
+    # Requirement satisfaction constraints
+    def collect_leaf_courses(req):
+        """Return set of course codes from all Course leaves under req."""
+        return extract_course_codes(req)
+
+    for req in remaining_requirements:
+        eligible_codes = collect_leaf_courses(req)
+        eligible_codes = {c for c in eligible_codes if c in candidate_courses}
+        if not eligible_codes:
+            logger.error(f"Requirement {req.type} has no eligible courses left.")
+            continue
+
+        # Build list of variables for eligible courses across all semesters
+        eligible_vars = []
+        for code in eligible_codes:
+            for s in range(earliest_semester[code], horizon):
+                if (code, s) in x:
+                    eligible_vars.append(x[code, s])
+
+        if req.type == RequirementType.COURSE:
+            model.Add(sum(eligible_vars) >= 1)
+
+        elif req.type == RequirementType.CHOOSE_N:
+            model.Add(sum(eligible_vars) >= req.choose)
+
+        elif req.type == RequirementType.CREDITS_FROM:
+            credit_sum = []
+            for code in eligible_codes:
+                for s in range(earliest_semester[code], horizon):
+                    if (code, s) in x:
+                        credit_sum.append(scaled_credits[code] * x[code, s])
+            required_scaled = int(req.credits_required * CREDIT_SCALE + 0.5)
+            model.Add(sum(credit_sum) >= required_scaled)
+
+        elif req.type == RequirementType.OR:
+            # Treat as CHOOSE_1 over all leaf courses under the OR
+            model.Add(sum(eligible_vars) >= 1)
+
+        elif req.type == RequirementType.AND:
+            for code in eligible_codes:
+                vars_for_code = [
+                    x[code, s]
+                    for s in range(earliest_semester[code], horizon)
+                    if (code, s) in x
+                ]
+                model.Add(sum(vars_for_code) >= 1)
+
+        else:
+            logger.warn(f"Unexpected requirement type in remaining: {req.type}")
+
+    # --- 7. Objective: minimize the last semester used ---
+    last_semester = model.NewIntVar(0, horizon - 1, "last_semester")
+    taken_flags = []
+    for s in range(horizon):
+        for code in candidate_courses:
+            if (code, s) in x:
+                taken_flags.append(s * x[code, s])
+    if taken_flags:
+        model.AddMaxEquality(last_semester, taken_flags)
+    model.Minimize(last_semester)
+
+    # --- 8. Solve ---
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = 10.0
+    status = solver.Solve(model)
+
+    if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
+        # Build resulting schedule
+        result_semesters = [[] for _ in range(horizon)]
+        # Add fixed courses
+        for s, sem_courses in enumerate(fixed_semesters):
+            result_semesters[s].extend(sem_courses)
+        # Add chosen courses
+        for code in candidate_courses:
+            for s in range(earliest_semester[code], horizon):
+                if (code, s) in x and solver.Value(x[code, s]):
+                    result_semesters[s].append(candidate_courses[code])
+        # Filter out empty semesters at the end
+        while result_semesters and not result_semesters[-1]:
+            result_semesters.pop()
+        return result_semesters
+    else:
+        logger.error("No feasible schedule found for remaining courses.")
+        return fixed_semesters
 
 
 def main(config: Config):
@@ -794,10 +850,6 @@ def main(config: Config):
         if simplified.type != RequirementType.NONE:
             simplified_remaining.append(simplified)
 
-    print("\n=== Remaining unsatisfied coursework ===")
-    for req in remaining_coursework:
-        print(f"{req.type}")
-
     print("\n=== Proposed semester schedule ===")
     for i, semester in enumerate(semesters, 1):
         print(f"Semester {i}: {[course.code for course in semester]}")
@@ -813,31 +865,62 @@ def main(config: Config):
                     f"Course {course} cannot be taken in Semester {i} ({'Spring' if is_spring else 'Fall'} {start_year}) due to offering pattern {course_obj.pattern}"
                 )
 
+    # Schedule remaining coursework using OR-Tools
+    final_schedule = schedule_remaining_with_ortools(
+        fixed_semesters=semesters,
+        remaining_requirements=simplified_remaining,
+        config=config,
+        all_courses=courses,
+        start_year=config.start_year,
+        start_term=config.start_term,
+        credits_per_semester=config.credits_per_semester,
+        max_additional_semesters=8,
+    )
+
+    print("\n=== Final schedule (including electives) ===")
+    for i, semester in enumerate(final_schedule, 1):
+        print(
+            f"Semester {i}: {[c.code for c in semester]} (total credits: {sum(c.min_credits for c in semester)})"
+        )
+        # Optionally validate offering patterns again
+        start_year = config.start_year + (i - 1) // 2
+        is_spring = (config.start_term == "spring") if i == 1 else (i % 2 == 0)
+        for course in semester:
+            if not pattern_allows(course.pattern, is_spring, start_year):
+                logger.error(
+                    f"Course {course.code} cannot be taken in Semester {i} ({'Spring' if is_spring else 'Fall'} {start_year}) due to offering pattern {course.pattern}"
+                )
+
     # Mark off bricks satisfied by these required courses
-    for code in all_required:
-        db_course = get_course(code)
-        if not db_course:
-            logger.error(f"Required course {code} not found in DB")
-            return
-        satisfied_bricks = db_course.bricks
-        brick_regex = r"\(([A-Z]+)\)"
+    # Iterate through every course in the final schedule and add its credits to the bricks it satisfies
+    for semester in final_schedule:
+        for course in semester:
+            for brick_str in course.bricks:
+                match = re.search(r"\(([A-Z]+)\)", brick_str)
+                if not match:
+                    logger.error(
+                        f"Brick string could not be matched to a category: {brick_str}"
+                    )
+                    continue
+                category = match.group(1)
+                if category in bricks:
+                    bricks[category]["current"] += course.min_credits
+                else:
+                    logger.warn(
+                        f"Unknown brick category '{category}' from course {course.code}"
+                    )
 
-        for brick in satisfied_bricks:
-            match = re.search(brick_regex, brick)
-            if not match:
-                logger.error("Brick could not be matched to a category")
-                continue
-
-            category = match.group(1)
-            bricks[category]["current"] += db_course.min_credits
-
-    print("\n=== Bricks ===")
+    print("\n=== Final Bricks Status ===")
     for key in bricks.keys():
         brick = bricks[key]
         if brick["current"] < brick["required"]:
-            print(f"{key} - {brick}")
+            print(
+                f"{key} - {brick['current']:.1f} / {brick['required']:.1f} (remaining: {brick['required'] - brick['current']:.1f})"
+            )
         else:
-            print(f"{key} - SATISFIED ({brick['current']} / {brick['required']})")
+            print(
+                f"{key} - SATISFIED ({brick['current']:.1f} / {brick['required']:.1f})"
+            )
 
 
 if __name__ == "__main__":
@@ -863,7 +946,7 @@ if __name__ == "__main__":
         ),
         completed_course_work=completed_courses,
         placements=[
-            Placement(subject="Math", level="1"),
+            Placement(subject="Math", level="3"),
             Placement(subject="Computer Science", level="3"),
         ],
         gpa=4.0,
