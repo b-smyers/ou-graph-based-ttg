@@ -11,7 +11,7 @@ from tenacity import (
 import requests
 
 BASE_URL = "https://www.catalogs.ohio.edu/content.php"
-OUTPUT_FILE = "programs.json"
+OUTPUT_FILE = "data/programs/programs.json"
 PROGRAM_TYPES = [
     "Certificate",
     "Major Program (Associate)",
