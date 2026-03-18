@@ -13,7 +13,6 @@ from typing import (
     Tuple,
 )
 from scheduling_types import (
-    BrickType,
     Requirement,
     RequirementType,
     OfferingPattern,
@@ -339,7 +338,7 @@ def schedule_remaining_with_ortools(
     for code in candidate_courses:
         earliest = earliest_semester[code]
         for s in range(earliest, horizon):
-            x[code, s] = model.NewBoolVar(f"x_{code}_s{s}")
+            x[code, s] = model.NewBoolVar(f"x_{code}_s{s}")  # type: ignore
 
     # --- 6. Constraints ---
 
@@ -351,7 +350,7 @@ def schedule_remaining_with_ortools(
             if (code, s) in x
         ]
         if vars_for_code:
-            model.Add(sum(vars_for_code) <= 1)
+            model.Add(sum(vars_for_code) <= 1)  # type: ignore
 
     # Credit limit per semester (using scaled integers) with effective_limit
     target_credits_scaled = effective_limit * CREDIT_SCALE
@@ -365,7 +364,7 @@ def schedule_remaining_with_ortools(
             if (code, s) in x:
                 credit_vars.append(scaled_credits[code] * x[code, s])
         if credit_vars:
-            model.Add(sum(credit_vars) + fixed_scaled <= target_credits_scaled)
+            model.Add(sum(credit_vars) + fixed_scaled <= target_credits_scaled)  # type: ignore
 
     # Prerequisite constraints among candidate courses
     for code_c, course_c in candidate_courses.items():
@@ -384,7 +383,7 @@ def schedule_remaining_with_ortools(
                 ]
                 if p_possible:
                     # If c is taken at s, then at least one of p_possible must be true
-                    model.AddBoolOr(p_possible + [x[code_c, s].Not()])
+                    model.AddBoolOr(p_possible + [x[code_c, s].Not()])  # type: ignore
 
     # Offering pattern constraints
     for s in range(horizon):
@@ -395,7 +394,7 @@ def schedule_remaining_with_ortools(
             if (code, s) in x:
                 course = candidate_courses[code]
                 if not pattern_allows(course.pattern, is_spring, year):
-                    model.Add(x[code, s] == 0)
+                    model.Add(x[code, s] == 0)  # type: ignore
 
     # Requirement satisfaction constraints
     def collect_leaf_courses(req):
@@ -417,10 +416,10 @@ def schedule_remaining_with_ortools(
                     eligible_vars.append(x[code, s])
 
         if req.type == RequirementType.COURSE:
-            model.Add(sum(eligible_vars) >= 1)
+            model.Add(sum(eligible_vars) >= 1)  # type: ignore
 
         elif req.type == RequirementType.CHOOSE_N:
-            model.Add(sum(eligible_vars) >= req.choose)
+            model.Add(sum(eligible_vars) >= req.choose)  # type: ignore
 
         elif req.type == RequirementType.CREDITS_FROM:
             credit_sum = []
@@ -429,11 +428,11 @@ def schedule_remaining_with_ortools(
                     if (code, s) in x:
                         credit_sum.append(scaled_credits[code] * x[code, s])
             required_scaled = int(req.credits_required * CREDIT_SCALE + 0.5)
-            model.Add(sum(credit_sum) >= required_scaled)
+            model.Add(sum(credit_sum) >= required_scaled)  # type: ignore
 
         elif req.type == RequirementType.OR:
             # Treat as CHOOSE_1 over all leaf courses under the OR
-            model.Add(sum(eligible_vars) >= 1)
+            model.Add(sum(eligible_vars) >= 1)  # type: ignore
 
         elif req.type == RequirementType.AND:
             for code in eligible_codes:
@@ -442,21 +441,21 @@ def schedule_remaining_with_ortools(
                     for s in range(earliest_semester[code], horizon)
                     if (code, s) in x
                 ]
-                model.Add(sum(vars_for_code) >= 1)
+                model.Add(sum(vars_for_code) >= 1)  # type: ignore
 
         else:
             logger.warn(f"Unexpected requirement type in remaining: {req.type}")
 
     # --- 7. Objective: minimize the last semester used ---
-    last_semester = model.NewIntVar(0, horizon - 1, "last_semester")
+    last_semester = model.NewIntVar(0, horizon - 1, "last_semester")  # type: ignore
     taken_flags = []
     for s in range(horizon):
         for code in candidate_courses:
             if (code, s) in x:
                 taken_flags.append(s * x[code, s])
     if taken_flags:
-        model.AddMaxEquality(last_semester, taken_flags)
-    model.Minimize(last_semester)
+        model.AddMaxEquality(last_semester, taken_flags)  # type: ignore
+    model.Minimize(last_semester)  # type: ignore
 
     # --- 8. Solve ---
     solver = cp_model.CpSolver()
@@ -743,8 +742,9 @@ def main(config: Config):
                 candidates = []
                 for course in offered_now:
                     course_obj = get_course(course)
-                    credits = course_obj.min_credits
-                    candidates.append((course, credits, out_degree.get(course, 0)))
+                    if course_obj:
+                        credits = course_obj.min_credits
+                        candidates.append((course, credits, out_degree.get(course, 0)))
 
                 # Sort: higher out-degree first, then lower credits (to pack more)
                 candidates.sort(key=lambda x: (-x[2], x[1]))
