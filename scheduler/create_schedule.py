@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 from ortools.sat.python import cp_model
 import json
 import re
@@ -265,9 +266,6 @@ def schedule_remaining_with_ortools(
     """
     CREDIT_SCALE = 10  # factor to convert float credits to integers
 
-    # --- Helper: get course by code (already in global scope) ---
-    # (uses existing get_course function)
-
     # --- 1. Collect all candidate courses from remaining requirements ---
     candidate_codes = set()
     for req in remaining_requirements:
@@ -300,6 +298,19 @@ def schedule_remaining_with_ortools(
         for course in sem:
             fixed_semester_index[course.code] = i
             fixed_credits[i] += course.min_credits
+
+    # --- NEW: Adjust credit limit if fixed semesters already exceed it ---
+    max_fixed_credits = max(fixed_credits) if fixed_credits else 0
+    effective_limit = credits_per_semester
+    if max_fixed_credits > credits_per_semester:
+        logger.warn(
+            f"Fixed schedule has a semester with {max_fixed_credits} credits, "
+            f"which exceeds the desired limit of {credits_per_semester}. "
+            f"Temporarily raising the limit to {max_fixed_credits} to allow scheduling. "
+            "The final schedule will exceed the desired credit load in that semester."
+        )
+        effective_limit = math.ceil(max_fixed_credits)
+    logger.info(f"Using credit limit of {effective_limit} credits per semester.")
 
     # --- 3. Determine earliest possible semester for each candidate course ---
     # based on fixed prerequisites
@@ -342,8 +353,8 @@ def schedule_remaining_with_ortools(
         if vars_for_code:
             model.Add(sum(vars_for_code) <= 1)
 
-    # Credit limit per semester (using scaled integers)
-    target_credits_scaled = credits_per_semester * CREDIT_SCALE
+    # Credit limit per semester (using scaled integers) with effective_limit
+    target_credits_scaled = effective_limit * CREDIT_SCALE
     for s in range(horizon):
         # fixed credits for this semester (scaled)
         fixed_scaled = (
@@ -669,9 +680,10 @@ def main(config: Config):
         config: Config,
     ) -> List[List[ParsedCourse]]:
         """
-        Sorts required courses into semesters using raw prerequisite trees
-        and course offering patterns. Returns a list of lists, where each
-        sublist corresponds to a semester in chronological order.
+        Sorts required courses into semesters using raw prerequisite trees,
+        course offering patterns, and credit limits.
+        Returns a list of lists, where each sublist corresponds to a semester
+        in chronological order.
         """
 
         # --- Step 0: Remove already completed courses ---
@@ -688,57 +700,88 @@ def main(config: Config):
                 logger.error(f"Course {course} not found in DB - skipping")
                 continue
 
-            # Collect all course codes from the raw prerequisite tree
             all_prereq_codes = collect_all_course_codes(course_obj.requisite)
-
-            # Keep only those that are also in all_required
             prereq_set = {c for c in all_prereq_codes if c in all_required}
             prereq_map[course] = prereq_set
 
             for prereq in prereq_set:
                 reverse_map.setdefault(prereq, set()).add(course)
 
-        # --- Step 2: Initialize in-degree and available set ---
+        # --- Step 2: Initialize in-degree, available set, and out-degree (for priority) ---
         in_degree = {course: len(prereq_map[course]) for course in all_required}
-
-        # Courses that are ready to be taken (all prerequisites satisfied)
         available = {c for c in all_required if in_degree[c] == 0}
-
-        # Remaining courses to schedule
         remaining = set(all_required)
         semesters = []  # will hold lists of courses per semester
 
-        # --- Step 3: Simulate semesters ---
+        # Precompute out-degree (number of courses that depend on each course)
+        out_degree = {
+            course: len(reverse_map.get(course, set())) for course in all_required
+        }
+
+        # --- Step 3: Simulate semesters with credit limit ---
         year = config.start_year
         is_spring = config.start_term == "spring"
+        credit_limit = config.credits_per_semester
 
         while remaining:
-            # Which available courses are offered this semester?
+            # Determine which available courses are offered this semester
             offered_now = []
             for course in available:
                 course_obj = get_course(course)
                 if course_obj and pattern_allows(course_obj.pattern, is_spring, year):
                     offered_now.append(course)
 
-            if offered_now:
-                # Place them this semester
-                semesters.append(offered_now)
-
-                # Remove them from available and remaining
+            if not offered_now:
+                # No courses offered – just advance time
+                logger.debug(
+                    f"Semester {year} {'Spring' if is_spring else 'Fall'}: no courses offered"
+                )
+            else:
+                # Greedy selection: pick courses with highest out-degree first,
+                # then smallest credits to fit more.
+                # Build list of (course, credits, out_degree)
+                candidates = []
                 for course in offered_now:
+                    course_obj = get_course(course)
+                    credits = course_obj.min_credits
+                    candidates.append((course, credits, out_degree.get(course, 0)))
+
+                # Sort: higher out-degree first, then lower credits (to pack more)
+                candidates.sort(key=lambda x: (-x[2], x[1]))
+
+                selected = []
+                remaining_credits = credit_limit
+                for course, credits, _ in candidates:
+                    if credits <= remaining_credits:
+                        selected.append(course)
+                        remaining_credits -= credits
+                    else:
+                        # This course alone exceeds remaining capacity; skip it for now.
+                        # It will remain in available for future semesters.
+                        pass
+
+                if not selected:
+                    # No course could fit – this indicates a single course exceeds the limit.
+                    # Raise an error because it's impossible to schedule under this limit.
+                    max_credit_course = max(candidates, key=lambda x: x[1])
+                    raise RuntimeError(
+                        f"Course {max_credit_course[0]} requires {max_credit_course[1]} credits, "
+                        f"which exceeds the per‑semester limit of {credit_limit}. "
+                        "Cannot schedule required courses."
+                    )
+
+                # Schedule the selected courses this semester
+                semesters.append(selected)
+
+                # Remove them from available and remaining, update dependents
+                for course in selected:
                     available.remove(course)
                     remaining.remove(course)
 
-                    # Update dependents
                     for dependent in reverse_map.get(course, []):
                         in_degree[dependent] -= 1
                         if in_degree[dependent] == 0:
                             available.add(dependent)
-            else:
-                # No courses can be taken this semester – just advance time
-                logger.debug(
-                    f"Semester {year} {'Spring' if is_spring else 'Fall'}: no courses offered"
-                )
 
             # Safety check: if available is empty but courses remain, something is wrong
             if not available and remaining:
@@ -749,11 +792,9 @@ def main(config: Config):
 
             # Advance to next semester
             if is_spring:
-                # Spring -> next Fall (same calendar year)
                 is_spring = False
-                # year stays the same (Fall of same year)
+                # year stays same (Fall of same calendar year)
             else:
-                # Fall -> next Spring (year+1)
                 is_spring = True
                 year += 1
 
