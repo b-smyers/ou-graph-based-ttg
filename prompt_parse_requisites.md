@@ -148,14 +148,14 @@ Output:
         {
             "type": "OR",
             "requirements": [
-            {
-                "type": "LEVEL",
-                "level": "junior"
-            },
-            {
-                "type": "LEVEL",
-                "level": "senior"
-            }
+                {
+                    "type": "LEVEL",
+                    "level": "junior"
+                },
+                {
+                    "type": "LEVEL",
+                    "level": "senior"
+                }
             ]
         }
     ]

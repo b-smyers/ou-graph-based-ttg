@@ -19,9 +19,10 @@ if not API_KEY:
 
 client = genai.Client(api_key=API_KEY)
 
-MODEL_NAME = "gemini-2.0-flash-lite"
+MODEL_NAME = "gemini-2.5-flash-lite"
+PROMPT_PATH = "prompt_parse_requisites.md"
 
-with open("prompt.md", "r") as file:
+with open(PROMPT_PATH, "r") as file:
     SYSTEM_PROMPT = file.read()
 
 ALLOWED_TYPES = {
