@@ -185,7 +185,6 @@ class Program(BaseModel):
     program_name: str
     program_link: str
     credits: int
-    code: str
     requisite: List[Requirement]
 
 

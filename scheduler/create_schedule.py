@@ -8,7 +8,6 @@ import os
 from typing import (
     Dict,
     List,
-    Literal,
     Set,
     Tuple,
 )
@@ -253,10 +252,6 @@ def schedule_remaining_with_ortools(
     fixed_semesters: List[List[ParsedCourse]],
     remaining_requirements: List[Requirement],
     config: Config,
-    all_courses: List[ParsedCourse],
-    start_year: int,
-    start_term: Literal["fall", "spring"],
-    credits_per_semester: int,
     max_additional_semesters: int = 8,
 ) -> List[List[ParsedCourse]]:
     """
@@ -300,11 +295,11 @@ def schedule_remaining_with_ortools(
 
     # --- NEW: Adjust credit limit if fixed semesters already exceed it ---
     max_fixed_credits = max(fixed_credits) if fixed_credits else 0
-    effective_limit = credits_per_semester
-    if max_fixed_credits > credits_per_semester:
+    effective_limit = config.credits_per_semester - 3
+    if max_fixed_credits > config.credits_per_semester:
         logger.warn(
             f"Fixed schedule has a semester with {max_fixed_credits} credits, "
-            f"which exceeds the desired limit of {credits_per_semester}. "
+            f"which exceeds the desired limit of {config.credits_per_semester}. "
             f"Temporarily raising the limit to {max_fixed_credits} to allow scheduling. "
             "The final schedule will exceed the desired credit load in that semester."
         )
@@ -388,8 +383,8 @@ def schedule_remaining_with_ortools(
     # Offering pattern constraints
     for s in range(horizon):
         year_offset = s // 2
-        year = start_year + year_offset
-        is_spring = (start_term == "spring") if s % 2 == 0 else (s % 2 == 1)
+        year = config.start_year + year_offset
+        is_spring = (config.start_term == "spring") if s % 2 == 0 else (s % 2 == 1)
         for code in candidate_courses:
             if (code, s) in x:
                 course = candidate_courses[code]
@@ -501,6 +496,41 @@ def main(config: Config):
         "BLD": {"current": 0.0, "required": 1.0},
         "CAP": {"current": 0.0, "required": 2.0},
     }
+    # Get bricks that satisfy each requirement
+    bricks_courses = {
+        "FWS": [],
+        "FAW": [],
+        "FQR": [],
+        "FIE": [],
+        "PHTC": [],
+        "PHA": [],
+        "PNS": [],
+        "PSBS": [],
+        "ACSW": [],
+        "ANW": [],
+        "ACNW": [],
+        "BSL": [],
+        "BER": [],
+        "BDP": [],
+        "BLD": [],
+        "CAP": [],
+    }
+    for course in courses:
+        for brick_str in course.bricks:
+            match = re.search(r"\(([A-Z]+)\)", brick_str)
+            if not match:
+                logger.error(
+                    f"Brick string could not be matched to a category: {brick_str}"
+                )
+                continue
+            category = match.group(1)
+            if category in bricks_courses:
+                bricks_courses[category].append(course)
+            else:
+                logger.warn(
+                    f"Unknown brick category '{category}' from course {course.code}"
+                )
+
     # Get requirements for program and then mark off all the credit hours they already satisfy
     semesters = {}
 
@@ -547,10 +577,8 @@ def main(config: Config):
 
     def simplify_requirement(
         req: Requirement,
-        current_gpa: float,
-        placements: List[Placement],
+        config: Config,
         completed_courses: List[str],  # list of course codes that have been completed
-        level: Level,  # one of "freshman", "sophomore", "junior", "senior"
     ) -> Requirement:
         """
         Return a simplified requirement tree where:
@@ -564,9 +592,7 @@ def main(config: Config):
         def resolve_and(requirements: List[Requirement]) -> List[Requirement]:
             simplified_children: List[Requirement] = []
             for child in requirements:
-                simp = simplify_requirement(
-                    child, current_gpa, placements, completed_courses, level
-                )
+                simp = simplify_requirement(child, config, completed_courses)
                 if simp.type != RequirementType.NONE:
                     simplified_children.append(simp)
             return simplified_children
@@ -574,9 +600,7 @@ def main(config: Config):
         def resolve_or(requirements: List[Requirement]) -> List[Requirement]:
             simplified_children: List[Requirement] = []
             for child in requirements:
-                simp = simplify_requirement(
-                    child, current_gpa, placements, completed_courses, level
-                )
+                simp = simplify_requirement(child, config, completed_courses)
                 # One satisfied child makes the whole OR satisfied
                 if simp.type == RequirementType.NONE:
                     return []  # One satisfied requirement satisfies the whole condition
@@ -597,19 +621,19 @@ def main(config: Config):
             return req
 
         if req.type == RequirementType.GPA:
-            if current_gpa >= req.gpa:
+            if config.gpa >= req.gpa:
                 return Empty(type=RequirementType.NONE)
             return req
 
         if req.type == RequirementType.PLACEMENT:
             # Note: exact match only – real‑world placement might be more complex
-            for p in placements:
+            for p in config.placements:
                 if p.subject == req.subject and p >= req:
                     return Empty(type=RequirementType.NONE)
             return req
 
         if req.type == RequirementType.LEVEL:
-            if level >= req:
+            if config.level >= req:
                 return Empty(type=RequirementType.NONE)
             return req
 
@@ -720,7 +744,9 @@ def main(config: Config):
         # --- Step 3: Simulate semesters with credit limit ---
         year = config.start_year
         is_spring = config.start_term == "spring"
-        credit_limit = config.credits_per_semester
+        credit_limit = (
+            config.credits_per_semester - 3
+        )  # -3 so we dont overload with program courses first (balance with bricks)
 
         while remaining:
             # Determine which available courses are offered this semester
@@ -824,11 +850,7 @@ def main(config: Config):
     processed = set()
     new_courses = all_required.copy()  # courses to process in the first iteration
 
-    iteration = 1
     while new_courses:
-        print(f"\n--- Iteration {iteration} ---")
-        print(f"Processing {len(new_courses)} courses: {sorted(new_courses)}")
-
         newly_discovered = set()
 
         for course_code in new_courses:
@@ -845,10 +867,8 @@ def main(config: Config):
             # Simplify the course's prerequisite tree
             simplified_tree = simplify_requirement(
                 req=And(requirements=parsed_course.requisite),
-                current_gpa=config.gpa,
-                placements=config.placements,
+                config=config,
                 completed_courses=config.completed_course_work,
-                level=config.level,
             )
 
             # Extract all course codes that still appear in the simplified tree
@@ -866,8 +886,6 @@ def main(config: Config):
         else:
             print("No new prerequisites found.")
 
-        iteration += 1
-
     print("\n=== Final set of all required courses ===")
     print(sorted(all_required.difference(initial_courses)))
 
@@ -883,15 +901,13 @@ def main(config: Config):
     for req in remaining_coursework:
         simplified = simplify_requirement(
             req,
-            config.gpa,
-            config.placements,
+            config,
             all_completed,
-            config.level,
         )
         if simplified.type != RequirementType.NONE:
             simplified_remaining.append(simplified)
 
-    print("\n=== Proposed semester schedule ===")
+    print("\n=== Base semester schedule ===")
     for i, semester in enumerate(semesters, 1):
         print(f"Semester {i}: {[course.code for course in semester]}")
 
@@ -911,14 +927,18 @@ def main(config: Config):
         fixed_semesters=semesters,
         remaining_requirements=simplified_remaining,
         config=config,
-        all_courses=courses,
-        start_year=config.start_year,
-        start_term=config.start_term,
-        credits_per_semester=config.credits_per_semester,
         max_additional_semesters=8,
     )
 
-    print("\n=== Final schedule (including electives) ===")
+    # Gather remaining required brick types
+    remaining_brick_types = []
+    for key, brick in bricks.items():
+        if brick["current"] < brick["required"]:
+            remaining_brick_types.append(key)
+
+    # TODO: Filter bricks_courses list for courses that could possibly be taken to fufill remaining brick requirements
+
+    print("\n=== Final schedule ===")
     for i, semester in enumerate(final_schedule, 1):
         print(
             f"Semester {i}: {[c.code for c in semester]} (total credits: {sum(c.min_credits for c in semester)})"
@@ -934,8 +954,10 @@ def main(config: Config):
 
     # Mark off bricks satisfied by these required courses
     # Iterate through every course in the final schedule and add its credits to the bricks it satisfies
+    total_credits = 0
     for semester in final_schedule:
         for course in semester:
+            total_credits += course.min_credits
             for brick_str in course.bricks:
                 match = re.search(r"\(([A-Z]+)\)", brick_str)
                 if not match:
@@ -951,6 +973,12 @@ def main(config: Config):
                         f"Unknown brick category '{category}' from course {course.code}"
                     )
 
+    # Add up previously completed courses
+    for code in config.completed_course_work:
+        course = get_course(code)
+        if course:
+            total_credits += course.min_credits
+
     print("\n=== Final Bricks Status ===")
     for key in bricks.keys():
         brick = bricks[key]
@@ -962,6 +990,9 @@ def main(config: Config):
             print(
                 f"{key} - SATISFIED ({brick['current']:.1f} / {brick['required']:.1f})"
             )
+
+    print("\n=== Total Credits Taken ===")
+    print(f"Total Semester Credits: {total_credits}")
 
 
 if __name__ == "__main__":
@@ -980,9 +1011,8 @@ if __name__ == "__main__":
             catalog_archived=program_data["catalog_archived"],
             program_type=program_data["program_type"],
             program_name=program_data["program_name"],
-            program_link=program_data["program_link"],
-            credits=program_data["credits"],
-            code=program_data["code"],
+            program_link=program_data["link"],
+            credits=120,
             requisite=program_requirements,
         ),
         completed_course_work=completed_courses,
