@@ -1,3 +1,12 @@
+"""
+get_programs.py
+
+Fetches all programs from all catalogs and writes them to a json file.
+
+Usage:
+    python get_programs.py
+"""
+
 import sys
 import json
 import re

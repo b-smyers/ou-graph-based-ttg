@@ -1,3 +1,26 @@
+"""
+parse_courses.py
+
+Given deduplicated `courses.json`, this program uses a LLM to-
+parse the requisite string into a computer readable recursive form.
+It also removes uneccesary information from the course objects that-
+are not neccesary for scheduling.
+
+This program can take a long time to parse the requisite string-
+for every course, and can handle exiting early with C^.
+
+Expect around 5000 LLM requests for parsing data produced.
+
+Steps:
+1. Run `course_offerings_tool.py` and collect all the courses for the lastest year for both fall and spring.
+2. Run `dedupe.py COURSES.json courses.unique.json` to get the deduplicated list of courses.
+3. Run `parse_courses.py courses.unique.json courses.parsed.json` to parse the requisities strings.
+4. Run `get_course_patterns.py courses.parsed.json` to populate offering patterns.
+
+Usage:
+    python parse_courses.py <courses.json> <output.json>
+"""
+
 import os
 import statistics
 import sys
@@ -10,6 +33,10 @@ from google import genai
 
 load_dotenv()
 
+MODEL_NAME = "gemini-2.5-flash-lite"
+PROMPTS_DIRECTORY = "prompts/"
+PROMPT_PATH = PROMPTS_DIRECTORY + "parse_requisites.md"
+
 API_KEY = os.getenv("GEMINI_API_KEY")
 if not API_KEY:
     print("[ERROR] GEMINI_API_KEY not set", file=sys.stderr)
@@ -19,7 +46,7 @@ client = genai.Client(api_key=API_KEY)
 
 MODEL_NAME = "gemini-2.5-flash-lite"
 
-with open("prompt.md", "r") as file:
+with open(PROMPT_PATH, "r") as file:
     SYSTEM_PROMPT = file.read()
 
 ALLOWED_TYPES = {
@@ -191,7 +218,7 @@ def main():
     output_path = sys.argv[2] if len(sys.argv) >= 3 else None
 
     if len(sys.argv) < 2 or courses_path is None or output_path is None:
-        print("Usage: parse_courses.py <input.json> [output.json]", file=sys.stderr)
+        print("Usage: parse_courses.py <courses.json> <output.json>", file=sys.stderr)
         sys.exit(1)
 
     with open(courses_path, "r", encoding="utf-8") as f:
@@ -205,34 +232,33 @@ def main():
     existing_courses = []
     existing_course_codes = set()
 
-    if output_path and os.path.exists(output_path):
-        try:
-            with open(output_path, "r", encoding="utf-8") as f:
-                existing_courses = json.load(f)
-                if isinstance(existing_courses, list):
-                    # Extract course codes from existing courses
-                    existing_course_codes = {
-                        course.get("code")
-                        for course in existing_courses
-                        if course.get("code")
-                    }
-                    print(
-                        f"[INFO] Found {len(existing_course_codes)} existing courses in output file"
-                    )
-                else:
-                    print(
-                        "[WARNING] Output file exists but is not a JSON array, will overwrite",
-                        file=sys.stderr,
-                    )
-                    existing_courses = []
-                    existing_course_codes = set()
-        except (json.JSONDecodeError, IOError) as e:
-            print(
-                f"[WARNING] Could not read existing output file: {e}, will overwrite",
-                file=sys.stderr,
-            )
-            existing_courses = []
-            existing_course_codes = set()
+    try:
+        with open(output_path, "r", encoding="utf-8") as f:
+            existing_courses = json.load(f)
+            if isinstance(existing_courses, list):
+                # Extract course codes from existing courses
+                existing_course_codes = {
+                    course.get("code")
+                    for course in existing_courses
+                    if course.get("code")
+                }
+                print(
+                    f"[INFO] Found {len(existing_course_codes)} existing courses in output file"
+                )
+            else:
+                print(
+                    "[WARNING] Output file exists but is not a JSON array, will overwrite",
+                    file=sys.stderr,
+                )
+                existing_courses = []
+                existing_course_codes = set()
+    except (json.JSONDecodeError, IOError) as e:
+        print(
+            f"[WARNING] Could not read existing output file: {e}, will overwrite",
+            file=sys.stderr,
+        )
+        existing_courses = []
+        existing_course_codes = set()
 
     # Start with existing courses
     processed_courses = existing_courses.copy()

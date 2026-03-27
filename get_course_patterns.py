@@ -1,4 +1,13 @@
-# get_course_patterns.py: Fetch course patterns from university catalog and add them to existing data.
+"""
+get_course_patterns.py
+
+Fetches the course patterns from university catalog and adds-
+the patterns to fetched courses
+
+Usage:
+    python get_course_patterns.py <courses_path>
+"""
+
 import sys
 import os
 import json

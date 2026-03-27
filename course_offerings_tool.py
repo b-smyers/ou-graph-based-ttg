@@ -1,10 +1,21 @@
+"""
+course_offerings_tool.py
+
+This tool integrates with the available course offerings tools-
+to fetch data from any of the endpoints. Importantly, this includes
+the courses endpoint to fetch course data locally.
+
+Usage:
+    python course_offerings_tool.py
+"""
+
 import math
 import json
 import requests
 
-base_url = "https://ais.kube.ohio.edu/api/course-offerings"
+BASE_URL = "https://ais.kube.ohio.edu/api/course-offerings"
 
-endpoints = {
+ENDPOINTS = {
     "INSTRUCTORS": "/data/instructors",
     "SUBJECTS": "/data/subjects",
     "TERMS": "/data/terms",
@@ -20,7 +31,7 @@ endpoints = {
 
 
 def get_endpoint_res(name):
-    target_url = base_url + endpoints[name]
+    target_url = BASE_URL + ENDPOINTS[name]
     r = requests.get(target_url)
     r.raise_for_status()
     return r
@@ -53,6 +64,7 @@ def get_courses():
     print("Term Semesters:\n1. Fall\n2. Spring\n3. Summer")
 
     term_semesters = []
+    selected_terms = []
 
     while not term_semesters:
         print("Examples: <enter>, 1, 1 2")
@@ -120,7 +132,7 @@ def get_courses():
     }
 
     # Step 1: Get total count
-    r = requests.post(base_url + endpoints["COUNTS"], json=payload)
+    r = requests.post(BASE_URL + ENDPOINTS["COUNTS"], json=payload)
     r.raise_for_status()
     course_count = r.json()["ATHN"]
     if course_count > 1000:
@@ -141,7 +153,7 @@ def get_courses():
         for i in range(page_count):
             params["page"] = i
             r = requests.post(
-                base_url + endpoints["QUERY"], params=params, json=payload
+                BASE_URL + ENDPOINTS["QUERY"], params=params, json=payload
             )
             r.raise_for_status()
             courses = r.json()["results"]
@@ -194,16 +206,6 @@ def main():
             if opt["id"] == choice:
                 opt["function"]()  # actually call it
                 break
-
-    # for name, path in endpoints.items():
-    #     target_url = base_url + path
-    #     r = requests.get(target_url)
-    #     r.raise_for_status()
-
-    #     with open(f"{name}.json", "w", encoding="utf-8") as f:
-    #         f.write(r.text)
-
-    #     print(f"Saved {name}.json")
 
 
 if __name__ == "__main__":

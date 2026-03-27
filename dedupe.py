@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 dedupe.py
 
@@ -8,9 +7,7 @@ Deduplicate a large JSON file by keeping only unique combinations of:
 - component
 
 Usage:
-    python dedupe.py input.json [output.json]
-
-If output.json is not provided, results are written to stdout.
+    python dedupe.py input.json <output.json>
 """
 
 import sys
@@ -19,17 +16,13 @@ import json
 KEYS = ("subject", "catalogNumber", "component")
 
 
-def die(msg: str):
-    print(f"[ERROR] {msg}", file=sys.stderr)
-    sys.exit(1)
-
-
 def main():
-    if len(sys.argv) < 2:
-        die("Usage: dedupe.py <input.json> [output.json]")
+    if len(sys.argv) < 3:
+        print("Usage: dedupe.py <input.json> <output.json>", file=sys.stderr)
+        sys.exit(1)
 
     input_path = sys.argv[1]
-    output_path = sys.argv[2] if len(sys.argv) >= 3 else None
+    output_path = sys.argv[2]
 
     seen = set()
     deduped = []
@@ -38,10 +31,12 @@ def main():
         with open(input_path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception as e:
-        die(f"Failed to read JSON: {e}")
+        print(f"[ERROR] Failed to read JSON: {e}", file=sys.stderr)
+        sys.exit(1)
 
     if not isinstance(data, list):
-        die("Top-level JSON must be an array")
+        print("[ERROR] Top-level JSON must be an array", file=sys.stderr)
+        sys.exit(1)
 
     for idx, obj in enumerate(data):
         if not isinstance(obj, dict):
@@ -60,13 +55,11 @@ def main():
         deduped.append(obj)
 
     try:
-        if output_path:
-            with open(output_path, "w", encoding="utf-8") as f:
-                json.dump(deduped, f, indent=2)
-        else:
-            json.dump(deduped, sys.stdout, indent=2)
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(deduped, f, indent=2)
     except Exception as e:
-        die(f"Failed to write output: {e}")
+        print(f"[ERROR] Failed to write output: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

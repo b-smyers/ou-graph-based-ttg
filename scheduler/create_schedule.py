@@ -1,3 +1,51 @@
+"""
+create_schedule.py
+
+This tool generates a personalized academic schedule based on a program's requirements,
+completed coursework, and a desired number of credits per semester. It uses a two-stage
+approach: a greedy topological sort for required courses, followed by an OR-Tools CP-SAT
+solver to place remaining elective and choice-based requirements.
+
+The script expects a local course catalog at data/courses/courses.parsed.json, which must
+contain complete course information (codes, credits, offering patterns, prerequisites, bricks).
+
+Scheduling Process:
+
+    Load program requirements and parse them into a tree of Requirement nodes.
+
+    Simplify the requirement tree using the student's existing context:
+    - Completed courses
+    - Placement scores
+    - GPA
+    - Academic level
+
+    Satisfied branches are removed, and remaining thresholds (e.g., credits from a set) are reduced.
+
+    Extract all required course codes (those that must be taken) and expand the set by following
+    prerequisites that are still needed (after simplification).
+
+    Schedule the required courses semester by semester using a greedy algorithm that respects:
+    - Prerequisite order (courses cannot be taken before their prerequisites are completed)
+    - Offering patterns (fall/spring, odd/even years, etc.)
+    - A per-semester credit limit (the target minus 3 credits to leave room for bricks/electives)
+
+    For the remaining coursework (OR, CHOOSE_N, CREDITS_FROM requirements that were not fully
+    satisfied by required courses), use OR-Tools to assign courses to the remaining semesters.
+    The solver minimizes the total number of semesters while respecting:
+    - Credit limits
+    - Offering patterns
+    - Prerequisites (both within the remaining set and relative to already scheduled courses)
+
+    After all courses are placed, check brick requirements (e.g., FWS, FAW, PHA) and report
+    how many credits of each brick were satisfied. Bricks are tracked from course metadata.
+
+The output is a semester-by-semester list of courses, including their codes and total credits.
+Any warnings (e.g., offering pattern violations, missing prerequisites) are logged to stderr.
+
+Usage:
+    python create_schedule.py <program.json> <credits-per-semester>
+"""
+
 from __future__ import annotations
 import math
 from ortools.sat.python import cp_model
