@@ -1,32 +1,13 @@
-# OU Graph Based Time-To-Graduation
-A graph-based approach to accurately estimating time-to-graduation at Ohio University.
+# OU Schedule Generator
 
-## Shared Setup
-```bash
-cp .env.sample .env
-uv sync
-```
+Schedule generator
 
-## Neo4j Setup
-### WSL
-1. Download and install neo4j desktop
-2. Create a DB and click the three dots on the DB
-7. Set `.env` variable `NEO4J_PASSWORD` (and `NEO4J_USERNAME` if you are not using the default)
-3. Select "Open > neo4j.conf"
-4. Uncomment or add "server.default_listen_address=0.0.0.0"
-5. Start/Restart DB through Neo4j desktop application
-6. In WSL find your windows IP using `ip route | grep default`
-7. Set `.env` variable `NEO4J_DB_URI=neo4j://<Windows-IP>:7687`
+## Tools
 
-## Running
-### Populating Database
-```bash
-uv run load.py data/catalog.sample.json
-```
-
-### Finding Longest Requirement Chain
-```bash
-uv run longest_chain.py "CS 2401"
-```
-
-11:55
+- `course_offerings_tool.py` - Integrates with course offerings APIs to fetch course data locally.
+- `dedupe.py` - Deduplicates JSON files by unique subject, catalog number, and component combinations.
+- `get_course_patterns.py` - Fetches course patterns from university catalog and adds them to courses.
+- `get_programs.py` - Fetches all programs from catalogs and saves to JSON.
+- `parse_courses.py` - Uses LLM to parse course requisite strings into computer-readable form.
+- `parse_program.py` - Uses LLM to parse program pages into computer-readable form.
+- `scheduler/create_schedule.py` - Generates personalized academic schedules based on program requirements.
