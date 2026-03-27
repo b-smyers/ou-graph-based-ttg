@@ -12,6 +12,10 @@ from google import genai
 
 load_dotenv()
 
+MODEL_NAME = "gemini-2.5-flash-lite"
+PROMPTS_DIRECTORY = "prompts/"
+PROMPT_PATH = PROMPTS_DIRECTORY + "parse_requisites.md"
+
 API_KEY = os.getenv("GEMINI_API_KEY")
 if not API_KEY:
     print("[ERROR] GEMINI_API_KEY not set", file=sys.stderr)
@@ -19,8 +23,6 @@ if not API_KEY:
 
 client = genai.Client(api_key=API_KEY)
 
-MODEL_NAME = "gemini-2.5-flash-lite"
-PROMPT_PATH = "prompt_parse_requisites.md"
 
 with open(PROMPT_PATH, "r") as file:
     SYSTEM_PROMPT = file.read()

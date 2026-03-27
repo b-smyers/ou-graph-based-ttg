@@ -15,19 +15,19 @@ from google import genai
 
 load_dotenv()
 
+MODEL_NAME = "gemini-2.5-flash-lite"
+PROMPTS_DIRECTORY = "prompts/"
+PROMPT_PATH = PROMPTS_DIRECTORY + "parse_program.md"
+
+PROGRAMS_DIRECTORY = "data/programs/"
+PROGRAMS_FILE = PROGRAMS_DIRECTORY + "programs.json"
+
 API_KEY = os.getenv("GEMINI_API_KEY")
 if not API_KEY:
     print("[ERROR] GEMINI_API_KEY not set", file=sys.stderr)
     sys.exit(1)
 
 client = genai.Client(api_key=API_KEY)
-
-MODEL_NAME = "gemini-2.5-flash-lite"
-PROMPT_PATH = "prompt_parse_program.md"
-PROGRAMS_DIRECTORY = "data/programs/"
-
-OUTPUT_FILE = "program.bs7477.json"
-PROGRAM_URL = "https://www.catalogs.ohio.edu/preview_program.php?catoid=104&poid=34482"
 
 with open(PROMPT_PATH, "r") as file:
     SYSTEM_PROMPT = file.read()
@@ -161,8 +161,28 @@ def parse_program(raw_text):
 
 
 def main():
+    if len(sys.argv) != 2:
+        print("Usage: parse_program.py <program poid>", file=sys.stderr)
+        sys.exit(1)
+
+    poid = int(sys.argv[1])
+    print("Loading programs")
+    with open(PROGRAMS_FILE, "r") as file:
+        programs_json = json.loads(file.read())
+
+    target_program = {}
+    for program in programs_json:
+        if program["poid"] == poid:
+            target_program = program
+            break
+
+    if not target_program:
+        print(f"Program with poid {poid} not found, exiting...")
+        return
+
+    print("Fetching...")
     try:
-        html = fetch_with_retry(PROGRAM_URL, allow_redirects=True, timeout=5)
+        html = fetch_with_retry(target_program["link"], allow_redirects=True, timeout=5)
     except Exception as e:
         print(f"[ERROR] Failed to fetch initial page: {e}")
         sys.exit(1)
@@ -180,22 +200,16 @@ def main():
 
     raw_text = "\n\n".join(texts)
 
+    print("Parsing...")
     parsed_program = parse_program(raw_text)
 
-    output_json = {
-        "catoid": 104,
-        "poid": 34482,
-        "catalog_name": "Ohio University 2025-2026 Undergraduate Catalog",
-        "catalog_year": 2026,
-        "catalog_archived": False,
-        "program_type": "Major Program (Baccalaureate)",
-        "program_name": "Artificial Intelligence Major (B.S.)",
-        "link": "https://www.catalogs.ohio.edu/preview_program.php?catoid=104&poid=34482",
-        "requisite": parsed_program,
-    }
+    target_program["requisite"] = parsed_program
 
-    with open(PROGRAMS_DIRECTORY + OUTPUT_FILE, "w", encoding="utf-8") as f:
-        json.dump(output_json, f, ensure_ascii=False, indent=2)
+    filename = f"program.{poid}.json"
+
+    print("Writing...")
+    with open(PROGRAMS_DIRECTORY + filename, "w", encoding="utf-8") as f:
+        json.dump(target_program, f, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":
