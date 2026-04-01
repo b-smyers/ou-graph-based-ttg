@@ -24,7 +24,7 @@ You are a strict JSON parser for university course requisites.
 # - "CONCURRENT_OR_COMPLETED" - The course an either be taken concurrently or prior (e.g. "CHEM 4901 or concurrent")
 
 { "type": "PLACEMENT", "subject": "<See subject options below>", "level": "3" }
-# subject: "Math", "Computer Science", "Chemistry", "HTC Chemistry", "Music Theory", "French",
+# subject: "Math", "Computer Science", "English", "Chemistry", "HTC Chemistry", "Music Theory", "French",
 # "German", "Spanish", "Arabic", "Chinese (Mandarin)", "Japanese", "Swahili", "Akan (Twi)", "Wolof",
 # "Hindi", "Indonesian", "Khmer", "Malaysian", "Thai", "American Sign Language", "Latin", "Greek"
 

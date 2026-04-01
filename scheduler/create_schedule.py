@@ -50,9 +50,6 @@ from __future__ import annotations
 import math
 from ortools.sat.python import cp_model
 import json
-import re
-import sys
-import os
 from typing import (
     Dict,
     List,
@@ -62,238 +59,30 @@ from typing import (
 from scheduling_types import (
     Requirement,
     RequirementType,
-    OfferingPattern,
     Course,
-    GPA,
-    Level,
-    Placement,
-    Permission,
-    Other,
-    Empty,
-    Or,
-    And,
-    CreditsFrom,
-    ChooseN,
     Program,
     Config,
     ParsedCourse,
+    Placement,
+    And,
 )
 from logger import logger
-
-
-def parse_args(argv):
-    if len(argv) < 2:
-        raise ValueError(
-            "Usage: create_schedule.py <program.json> <credits-per-semester>"
-        )
-
-    program_path = argv[0]
-    try:
-        credits_per_semester = int(argv[1])
-    except ValueError:
-        raise ValueError(f"credits-per-semester must be an integer, got: {argv[1]}")
-
-    if not os.path.exists(program_path):
-        raise ValueError(f"{program_path} does not exist")
-    if not os.path.isfile(program_path):
-        raise ValueError(f"{program_path} must be a file")
-    if not credits_per_semester:
-        raise ValueError("credits-per-semester must be a positive integer")
-
-    if credits_per_semester < 12:
-        logger.info("Credits Per Semester: Part-time enrollment")
-    elif credits_per_semester <= 20:
-        logger.info("Credits Per Semester: Full-time enrollment")
-    elif credits_per_semester > 20:
-        logger.info("Credits Per Semester: Overloaded enrollment")
-    else:
-        raise ValueError(f"Invalid credits per semester: {credits_per_semester}")
-
-    return program_path, credits_per_semester
-
-
-def load_json(path):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data
-    except FileNotFoundError as e:
-        raise FileNotFoundError(f"File not found: {path}") from e
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Failed to parse {path} as JSON: {e}") from e
-
-
-def parse_requirements(requirement_list) -> List[Requirement]:
-    parsed = []
-    for item in requirement_list:
-        requirement_type = item["type"]
-        match requirement_type:
-            case RequirementType.NONE:
-                parsed.append(Empty())
-            case RequirementType.PERMISSION:
-                parsed.append(Permission(**item))
-            case RequirementType.LEVEL:
-                parsed.append(Level(**item))
-            case RequirementType.PLACEMENT:
-                parsed.append(Placement(**item))
-            case RequirementType.GPA:
-                parsed.append(GPA(**item))
-            case RequirementType.COURSE:
-                parsed.append(Course(**item))
-            case RequirementType.OR:
-                parsed.append(
-                    Or(
-                        type=RequirementType.OR,
-                        requirements=parse_requirements(item["requirements"]),
-                    )
-                )
-            case RequirementType.AND:
-                parsed.append(
-                    And(
-                        type=RequirementType.AND,
-                        requirements=parse_requirements(item["requirements"]),
-                    )
-                )
-            case RequirementType.CREDITS_FROM:
-                parsed.append(
-                    CreditsFrom(
-                        credits_required=item["credits_required"],
-                        requirements=parse_requirements(item["requirements"]),
-                    )
-                )
-            case RequirementType.CHOOSE_N:
-                parsed.append(
-                    ChooseN(
-                        choose=item["choose"],
-                        requirements=parse_requirements(item["requirements"]),
-                    )
-                )
-            case RequirementType.OTHER:
-                parsed.append(Other(**item))
-            case _:
-                logger.error(
-                    f"Invalid program data. No requirement type matched for {requirement_type}"
-                )
-                exit(1)
-    return parsed
-
-
-def pattern_allows(pattern: OfferingPattern, is_spring: bool, year: int):
-    """Return True if a course with `pattern` may be scheduled in the term.
-
-    - `is_spring`: True for spring semesters, False for fall semesters
-    - `year`: integer year (e.g., 2025)
-    """
-    if not pattern:
-        return True
-
-    p = pattern.lower()
-    # summer terms are not supported by the scheduler; treat summer-only as disallowed
-    if p == OfferingPattern.SUMMER:
-        return False
-    if p == OfferingPattern.FALL_AND_SPRING:
-        return True
-    if p == OfferingPattern.FALL:
-        return not is_spring
-    if p == OfferingPattern.SPRING:
-        return is_spring
-    if p == OfferingPattern.FALL_EVEN:
-        return (not is_spring) and (year % 2 == 0)
-    if p == OfferingPattern.FALL_ODD:
-        return (not is_spring) and (year % 2 == 1)
-    if p == OfferingPattern.SPRING_EVEN:
-        return is_spring and (year % 2 == 0)
-    if p == OfferingPattern.SPRING_ODD:
-        return is_spring and (year % 2 == 1)
-    if p == OfferingPattern.SUMMER_EVEN:
-        return False
-    if p == OfferingPattern.SUMMER_ODD:
-        return False
-    if p == OfferingPattern.IRREGULAR:
-        # allowed any time, but caller may choose to warn
-        return True
-    if p == OfferingPattern.ARRANGED:
-        return True
-    if p == OfferingPattern.DEACTIVATED:
-        return False
-
-    # Unknown patterns default to allowed
-    return True
-
-
-courses: List[ParsedCourse] = []
-
-
-def get_course(code) -> ParsedCourse | None:
-    for course in courses:
-        if course.code == code:
-            return course
-
-
-def get_level(completed_courses: List[str]) -> Level:
-    total_credits = 0
-    for code in completed_courses:
-        course = get_course(code)
-        if not course:
-            logger.warn(f"Not counting course '{code}' for credits level")
-            continue
-        total_credits += course.min_credits
-
-    if total_credits > 90:
-        return Level(level="senior")
-    elif total_credits > 60:
-        return Level(level="junior")
-    elif total_credits > 30:
-        return Level(level="sophomore")
-    else:
-        return Level(level="freshman")
-
-
-# Get shortest subrequirement tree for each required program course
-def extract_course_codes(req: Requirement) -> Set[str]:
-    """
-    Recursively collect all course codes from Course leaves anywhere in the tree.
-    """
-    codes = set()
-    if isinstance(req, Course):
-        codes.add(req.course)
-    # All composite types (And, Or, CreditsFrom, ChooseN) have a 'requirements' list
-    if (
-        isinstance(req, Or)
-        or isinstance(req, And)
-        or isinstance(req, CreditsFrom)
-        or isinstance(req, ChooseN)
-    ):
-        for child in req.requirements:
-            codes.update(extract_course_codes(child))
-    return codes
-
-
-def collect_all_course_codes(req) -> Set[str]:
-    """
-    Recursively collect all course codes from any Course leaf.
-    Handles both a single node and a list of nodes.
-    """
-    codes = set()
-
-    # If req is a list, process each element
-    if isinstance(req, list):
-        for item in req:
-            codes.update(collect_all_course_codes(item))
-        return codes
-
-    # If it's a Course leaf (identified by its type)
-    if hasattr(req, "type") and req.type == RequirementType.COURSE:
-        if hasattr(req, "course"):
-            codes.add(req.course)
-        return codes
-
-    # If it's a composite node with a 'requirements' list (AND, OR, etc.)
-    if hasattr(req, "requirements") and isinstance(req.requirements, list):
-        for child in req.requirements:
-            codes.update(collect_all_course_codes(child))
-
-    return codes
+from data_loader import (
+    load_json,
+    parse_requirements,
+    get_course,
+    get_level,
+    initialize_courses,
+    PROGRAMS_DIRECTORY,
+)
+from utils import pattern_allows, extract_course_codes, collect_all_course_codes
+from requirement_simplifier import simplify_requirement
+from brick_handler import (
+    initialize_bricks,
+    update_bricks_from_courses,
+    report_bricks,
+    get_remaining_brick_types,
+)
 
 
 def schedule_remaining_with_ortools(
@@ -526,58 +315,7 @@ def schedule_remaining_with_ortools(
 
 
 def main(config: Config):
-    bricks = {
-        "FWS": {"current": 0.0, "required": 3.0},
-        "FAW": {"current": 0.0, "required": 3.0},
-        "FQR": {"current": 0.0, "required": 3.0},
-        "FIE": {"current": 0.0, "required": 2.0},
-        "PHTC": {"current": 0.0, "required": 3.0},
-        "PHA": {"current": 0.0, "required": 3.0},
-        "PNS": {"current": 0.0, "required": 3.0},
-        "PSBS": {"current": 0.0, "required": 3.0},
-        "ACSW": {"current": 0.0, "required": 3.0},
-        "ANW": {"current": 0.0, "required": 3.0},
-        "ACNW": {"current": 0.0, "required": 3.0},
-        "BSL": {"current": 0.0, "required": 1.0},
-        "BER": {"current": 0.0, "required": 1.0},
-        "BDP": {"current": 0.0, "required": 1.0},
-        "BLD": {"current": 0.0, "required": 1.0},
-        "CAP": {"current": 0.0, "required": 2.0},
-    }
-    # Get bricks that satisfy each requirement
-    bricks_courses = {
-        "FWS": [],
-        "FAW": [],
-        "FQR": [],
-        "FIE": [],
-        "PHTC": [],
-        "PHA": [],
-        "PNS": [],
-        "PSBS": [],
-        "ACSW": [],
-        "ANW": [],
-        "ACNW": [],
-        "BSL": [],
-        "BER": [],
-        "BDP": [],
-        "BLD": [],
-        "CAP": [],
-    }
-    for course in courses:
-        for brick_str in course.bricks:
-            match = re.search(r"\(([A-Z]+)\)", brick_str)
-            if not match:
-                logger.error(
-                    f"Brick string could not be matched to a category: {brick_str}"
-                )
-                continue
-            category = match.group(1)
-            if category in bricks_courses:
-                bricks_courses[category].append(course)
-            else:
-                logger.warn(
-                    f"Unknown brick category '{category}' from course {course.code}"
-                )
+    bricks = initialize_bricks()
 
     # Get requirements for program and then mark off all the credit hours they already satisfy
     semesters = {}
@@ -622,129 +360,6 @@ def main(config: Config):
         config.program.requisite
     )
     print("Required courses:", [course.course for course in required_courses])
-
-    def simplify_requirement(
-        req: Requirement,
-        config: Config,
-        completed_courses: List[str],  # list of course codes that have been completed
-    ) -> Requirement:
-        """
-        Return a simplified requirement tree where:
-        - Satisfied leaves become NONE.
-        - AND/OR nodes are reduced (remove satisfied children, propagate satisfaction).
-        - CREDITS_FROM/CHOOSE_N are only adjusted for completed courses; their children are NOT simplified.
-        - PERMISSION is always left unsatisfied (with a comment).
-        - OTHER is always treated as satisfied (becomes NONE).
-        """
-
-        def resolve_and(requirements: List[Requirement]) -> List[Requirement]:
-            simplified_children: List[Requirement] = []
-            for child in requirements:
-                simp = simplify_requirement(child, config, completed_courses)
-                if simp.type != RequirementType.NONE:
-                    simplified_children.append(simp)
-            return simplified_children
-
-        def resolve_or(requirements: List[Requirement]) -> List[Requirement]:
-            simplified_children: List[Requirement] = []
-            for child in requirements:
-                simp = simplify_requirement(child, config, completed_courses)
-                # One satisfied child makes the whole OR satisfied
-                if simp.type == RequirementType.NONE:
-                    return []  # One satisfied requirement satisfies the whole condition
-                simplified_children.append(simp)
-            return simplified_children
-
-        # ---------- Leaf types ----------
-        if req.type == RequirementType.NONE:
-            return req
-
-        if req.type == RequirementType.COURSE:
-            if req.course in completed_courses:
-                return Empty()
-            course = get_course(req.course)
-            if not course:
-                logger.warn(f"Ingoring non-existant requireed course {req.course}")
-                return Empty()
-            return req
-
-        if req.type == RequirementType.GPA:
-            if config.gpa >= req.gpa:
-                return Empty(type=RequirementType.NONE)
-            return req
-
-        if req.type == RequirementType.PLACEMENT:
-            # Note: exact match only – real‑world placement might be more complex
-            for p in config.placements:
-                if p.subject == req.subject and p >= req:
-                    return Empty(type=RequirementType.NONE)
-            return req
-
-        if req.type == RequirementType.LEVEL:
-            if config.level >= req:
-                return Empty(type=RequirementType.NONE)
-            return req
-
-        if req.type == RequirementType.PERMISSION:
-            # NOTE: Permission is always considered unsatisfied by default.
-            # In a real system, you might check external data.
-            return req
-
-        if req.type == RequirementType.OTHER:
-            # NOTE: "OTHER" is assumed to be satisfied.
-            return Empty(type=RequirementType.NONE)
-
-        # ---------- Composite logical nodes (full recursion) ----------
-        if req.type == RequirementType.AND:
-            simplified_children = resolve_and(req.requirements)
-            # Simplify if all children are satisfied
-            if not simplified_children:
-                return Empty(type=RequirementType.NONE)
-            return And(requirements=simplified_children)
-
-        if req.type == RequirementType.OR:
-            simplified_children = resolve_or(req.requirements)
-            if not simplified_children:
-                return Empty(type=RequirementType.NONE)
-            return Or(requirements=simplified_children)
-
-        # ---------- CREDITS_FROM and CHOOSE_N (no child simplification, only adjust thresholds) ----------
-        if req.type == RequirementType.CREDITS_FROM:
-            # Collect all course codes anywhere under this node
-            codes = extract_course_codes(req)
-            total_credits = 0.0
-            for code in codes:
-                if code in completed_courses:
-                    course_info = get_course(code)
-                    if course_info:
-                        total_credits += course_info.min_credits
-                    else:
-                        logger.warn(
-                            f"Course {code} not found in course catalog; assuming 0 credits."
-                        )
-            if total_credits >= req.credits_required:
-                return Empty(type=RequirementType.NONE)
-            # Return a new CreditsFrom with reduced requirement, keeping the original child list unchanged.
-            return CreditsFrom(
-                credits_required=req.credits_required - total_credits,
-                requirements=req.requirements,  # note: children are NOT simplified
-            )
-
-        if req.type == RequirementType.CHOOSE_N:
-            codes = extract_course_codes(req)
-            # Count distinct completed courses among the codes
-            completed_in_subtree = {code for code in codes if code in completed_courses}
-            count = len(completed_in_subtree)
-            if count >= req.choose:
-                return Empty(type=RequirementType.NONE)
-            return ChooseN(
-                choose=req.choose - count,
-                requirements=req.requirements,  # children unchanged
-            )
-
-        # Fallback (should never reach here if all types are covered)
-        logger.error("Fallback triggered. Requirement type is uncovered.")
-        return req
 
     def schedule_courses(
         all_required: Set[str],
@@ -979,12 +594,9 @@ def main(config: Config):
     )
 
     # Gather remaining required brick types
-    remaining_brick_types = []
-    for key, brick in bricks.items():
-        if brick["current"] < brick["required"]:
-            remaining_brick_types.append(key)
+    remaining_brick_types = get_remaining_brick_types(bricks)
 
-    # TODO: Filter bricks_courses list for courses that could possibly be taken to fufill remaining brick requirements
+    # TODO: Insert BRICK placeholders into schedule
 
     print("\n=== Final schedule ===")
     for i, semester in enumerate(final_schedule, 1):
@@ -1002,24 +614,13 @@ def main(config: Config):
 
     # Mark off bricks satisfied by these required courses
     # Iterate through every course in the final schedule and add its credits to the bricks it satisfies
-    total_credits = 0
-    for semester in final_schedule:
-        for course in semester:
-            total_credits += course.min_credits
-            for brick_str in course.bricks:
-                match = re.search(r"\(([A-Z]+)\)", brick_str)
-                if not match:
-                    logger.error(
-                        f"Brick string could not be matched to a category: {brick_str}"
-                    )
-                    continue
-                category = match.group(1)
-                if category in bricks:
-                    bricks[category]["current"] += course.min_credits
-                else:
-                    logger.warn(
-                        f"Unknown brick category '{category}' from course {course.code}"
-                    )
+    all_scheduled_courses = [
+        course for semester in final_schedule for course in semester
+    ]
+    update_bricks_from_courses(bricks, all_scheduled_courses)
+
+    # Calculate total credits
+    total_credits = sum(course.min_credits for course in all_scheduled_courses)
 
     # Add up previously completed courses
     for code in config.completed_course_work:
@@ -1027,31 +628,50 @@ def main(config: Config):
         if course:
             total_credits += course.min_credits
 
-    print("\n=== Final Bricks Status ===")
-    for key in bricks.keys():
-        brick = bricks[key]
-        if brick["current"] < brick["required"]:
-            print(
-                f"{key} - {brick['current']:.1f} / {brick['required']:.1f} (remaining: {brick['required'] - brick['current']:.1f})"
-            )
-        else:
-            print(
-                f"{key} - SATISFIED ({brick['current']:.1f} / {brick['required']:.1f})"
-            )
+    report_bricks(bricks)
 
     print("\n=== Total Credits Taken ===")
     print(f"Total Semester Credits: {total_credits}")
 
+    output = {
+        "semesters": [
+            [{"code": course.code, "bricks": course.bricks} for course in semester]
+            for semester in final_schedule
+        ],
+        "bricks": {
+            key: {**value, "satisfied": value["current"] >= value["required"]}
+            for key, value in bricks.items()
+        },
+        "total_semesters": len(final_schedule),
+        "total_credits": total_credits,
+    }
+
+    return output
+
 
 if __name__ == "__main__":
-    program_path, credits_per_semester = parse_args(sys.argv[1:])
-    program_data = load_json(program_path)
+    args = {
+        "poid": 34482,
+        "start_term": "fall",
+        "start_year": 2026,
+        "credits_per_semester": 16,
+        "completed_coursework": [],
+        "placements": [
+            {"subject": "Math", "level": "1"},
+            {"subject": "Computer Science", "level": "3"},
+        ],
+    }
+
+    # Initialize the course catalog
+    initialize_courses("data/courses/courses.parsed.json")
+
+    program_data = load_json(PROGRAMS_DIRECTORY + f"program.{args['poid']}.json")
     program_requirements: List[Requirement] = parse_requirements(
         program_data["requisite"][
             "requirements"
         ]  # TODO: Jank solution because 'requisite' is not an array but an object
     )
-    completed_courses = []
+
     config = Config(
         program=Program(
             catalog_name=program_data["catalog_name"],
@@ -1063,31 +683,17 @@ if __name__ == "__main__":
             credits=120,
             requisite=program_requirements,
         ),
-        completed_course_work=completed_courses,
+        completed_course_work=args["completed_coursework"],
         placements=[
-            Placement(subject="Math", level="3"),
-            Placement(subject="Computer Science", level="3"),
+            Placement(subject=placement["subject"], level=placement["level"])
+            for placement in args["placements"]
         ],
         gpa=4.0,
-        level=get_level(completed_courses),
-        credits_per_semester=credits_per_semester,
-        start_year=2026,
-        start_term="fall",
+        level=get_level(args["completed_coursework"]),
+        credits_per_semester=args["credits_per_semester"],
+        start_year=args["start_year"],
+        start_term=args["start_term"],
     )
-    courses_raw = load_json("data/courses/courses.parsed.json")
-    for course in courses_raw:
-        course_requirements = parse_requirements([course["requisite"]])
-        courses.append(
-            ParsedCourse(
-                name=course["name"],
-                code=course["code"],
-                requisite_string=course["requisite_string"],
-                requisite=course_requirements,
-                component=course["component"],
-                bricks=course["bricks"],
-                min_credits=course["min_credits"],
-                max_credits=course["max_credits"],
-                pattern=OfferingPattern(course["pattern"]),
-            )
-        )
-    main(config)
+
+    output = main(config)
+    print(json.dumps(output, indent=2))

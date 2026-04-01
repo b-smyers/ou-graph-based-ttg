@@ -31,6 +31,32 @@ BrickType = Literal[
     "CAP",
 ]
 
+PlacementSubject = Literal[
+    "Math",
+    "Computer Science",
+    "English",
+    "Chemistry",
+    "HTC Chemistry",
+    "Music Theory",
+    "French",
+    "German",
+    "Spanish",
+    "Arabic",
+    "Chinese (Mandarin)",
+    "Japanese",
+    "Swahili",
+    "Akan (Twi)",
+    "Wolof",
+    "Hindi",
+    "Indonesian",
+    "Khmer",
+    "Malaysian",
+    "Thai",
+    "American Sign Language",
+    "Latin",
+    "Greek",
+]
+
 
 class OfferingPattern(str, Enum):
     SUMMER = "summer"
@@ -85,7 +111,7 @@ class GPA(BaseRequirement):
 @total_ordering
 class Placement(BaseRequirement):
     type: Literal[RequirementType.PLACEMENT] = RequirementType.PLACEMENT
-    subject: str
+    subject: PlacementSubject
     level: str
 
     def _rank(self) -> int:
