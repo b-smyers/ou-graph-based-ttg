@@ -4,6 +4,7 @@ brick_handler.py
 Manages brick requirements, tracking, and reporting.
 """
 
+import math
 import re
 from typing import Dict, List
 from scheduling_types import ParsedCourse
@@ -68,10 +69,11 @@ def report_bricks(bricks: Dict[str, Dict[str, float]]) -> None:
             )
 
 
-def get_remaining_brick_types(bricks: Dict[str, Dict[str, float]]) -> List[str]:
-    """Return list of brick types that have not been satisfied."""
-    remaining = []
-    for key, brick in bricks.items():
-        if brick["current"] < brick["required"]:
-            remaining.append(key)
-    return remaining
+def get_remaining_brick_count(bricks: Dict[str, Dict[str, float]]) -> int:
+    """Return number of remaining bricks needed."""
+    # assume each brick is 3 credits for now, but this could be adjusted if needed
+    return sum(
+        math.ceil((brick["required"] - brick["current"]) / 3)
+        for brick in bricks.values()
+        if brick["current"] < brick["required"]
+    )

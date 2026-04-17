@@ -235,3 +235,7 @@ class ParsedCourse(BaseModel):
     min_credits: float
     max_credits: float
     pattern: OfferingPattern
+
+
+class BrickPlaceholder(BaseModel):
+    code: Literal["BRICK"] = "BRICK"

@@ -47,9 +47,9 @@ Usage:
 """
 
 from __future__ import annotations
+from copy import deepcopy
 import math
 from ortools.sat.python import cp_model
-import json
 from typing import (
     Dict,
     List,
@@ -60,28 +60,20 @@ from scheduling_types import (
     Requirement,
     RequirementType,
     Course,
-    Program,
     Config,
     ParsedCourse,
-    Placement,
+    BrickPlaceholder,
     And,
 )
 from logger import logger
-from data_loader import (
-    load_json,
-    parse_requirements,
-    get_course,
-    get_level,
-    initialize_courses,
-    PROGRAMS_DIRECTORY,
-)
+from data_loader import get_course
 from utils import pattern_allows, extract_course_codes, collect_all_course_codes
 from requirement_simplifier import simplify_requirement
 from brick_handler import (
     initialize_bricks,
     update_bricks_from_courses,
     report_bricks,
-    get_remaining_brick_types,
+    get_remaining_brick_count,
 )
 
 
@@ -314,7 +306,7 @@ def schedule_remaining_with_ortools(
         return fixed_semesters
 
 
-def main(config: Config):
+def create_schedule(config: Config):
     bricks = initialize_bricks()
 
     # Get requirements for program and then mark off all the credit hours they already satisfy
@@ -593,31 +585,57 @@ def main(config: Config):
         max_additional_semesters=8,
     )
 
-    # Gather remaining required brick types
-    remaining_brick_types = get_remaining_brick_types(bricks)
-
-    # TODO: Insert BRICK placeholders into schedule
-
-    print("\n=== Final schedule ===")
-    for i, semester in enumerate(final_schedule, 1):
-        print(
-            f"Semester {i}: {[c.code for c in semester]} (total credits: {sum(c.min_credits for c in semester)})"
-        )
-        # Optionally validate offering patterns again
-        start_year = config.start_year + (i - 1) // 2
-        is_spring = (config.start_term == "spring") if i == 1 else (i % 2 == 0)
-        for course in semester:
-            if not pattern_allows(course.pattern, is_spring, start_year):
-                logger.error(
-                    f"Course {course.code} cannot be taken in Semester {i} ({'Spring' if is_spring else 'Fall'} {start_year}) due to offering pattern {course.pattern}"
-                )
-
     # Mark off bricks satisfied by these required courses
     # Iterate through every course in the final schedule and add its credits to the bricks it satisfies
     all_scheduled_courses = [
         course for semester in final_schedule for course in semester
     ]
     update_bricks_from_courses(bricks, all_scheduled_courses)
+
+    remaining_brick_count: int = get_remaining_brick_count(bricks)
+
+    final_schedule_with_bricks: List[List[ParsedCourse | BrickPlaceholder]] = deepcopy(
+        final_schedule
+    )  # type: ignore
+    while remaining_brick_count:
+        # Naive approach 2: repeatedly insert a brick into the semester with the lowest total credits until all bricks are satisfied
+        semester_credits = []
+        for semester in final_schedule_with_bricks:
+            credits = sum(
+                course.min_credits if isinstance(course, ParsedCourse) else 3
+                for course in semester
+            )  # assume each brick is worth 3 credits for this calculation
+            semester_credits.append(credits)
+        # Find semester with lowest credits
+        min_index = semester_credits.index(min(semester_credits))
+        final_schedule_with_bricks[min_index].append(BrickPlaceholder())
+        remaining_brick_count -= 1
+
+    print("\n=== Final schedule ===")
+    for i, semester in enumerate(final_schedule_with_bricks, 1):
+        course_codes = [c.code for c in semester if isinstance(c, ParsedCourse)]
+        brick_count = sum(1 for c in semester if isinstance(c, BrickPlaceholder))
+        course_credits = sum(
+            c.min_credits for c in semester if isinstance(c, ParsedCourse)
+        )
+        total_semester_credits = course_credits + (brick_count * 3)
+
+        semester_str = f"{course_codes}"
+        if brick_count > 0:
+            semester_str += f" + {brick_count} BRICK(s)"
+
+        print(f"Semester {i}: {semester_str} (total credits: {total_semester_credits})")
+
+        # Optionally validate offering patterns again
+        start_year = config.start_year + (i - 1) // 2
+        is_spring = (config.start_term == "spring") if i == 1 else (i % 2 == 0)
+        for course in semester:
+            if isinstance(course, ParsedCourse) and not pattern_allows(
+                course.pattern, is_spring, start_year
+            ):
+                logger.error(
+                    f"Course {course.code} cannot be taken in Semester {i} ({'Spring' if is_spring else 'Fall'} {start_year}) due to offering pattern {course.pattern}"
+                )
 
     # Calculate total credits
     total_credits = sum(course.min_credits for course in all_scheduled_courses)
@@ -635,65 +653,20 @@ def main(config: Config):
 
     output = {
         "semesters": [
-            [{"code": course.code, "bricks": course.bricks} for course in semester]
-            for semester in final_schedule
+            [
+                {"code": "BRICK"}
+                if isinstance(course, BrickPlaceholder)
+                else {"code": course.code, "bricks": course.bricks}
+                for course in semester
+            ]
+            for semester in final_schedule_with_bricks
         ],
         "bricks": {
             key: {**value, "satisfied": value["current"] >= value["required"]}
             for key, value in bricks.items()
         },
-        "total_semesters": len(final_schedule),
+        "total_semesters": len(final_schedule_with_bricks),
         "total_credits": total_credits,
     }
 
     return output
-
-
-if __name__ == "__main__":
-    args = {
-        "poid": 34482,
-        "start_term": "fall",
-        "start_year": 2026,
-        "credits_per_semester": 16,
-        "completed_coursework": [],
-        "placements": [
-            {"subject": "Math", "level": "1"},
-            {"subject": "Computer Science", "level": "3"},
-        ],
-    }
-
-    # Initialize the course catalog
-    initialize_courses("data/courses/courses.parsed.json")
-
-    program_data = load_json(PROGRAMS_DIRECTORY + f"program.{args['poid']}.json")
-    program_requirements: List[Requirement] = parse_requirements(
-        program_data["requisite"][
-            "requirements"
-        ]  # TODO: Jank solution because 'requisite' is not an array but an object
-    )
-
-    config = Config(
-        program=Program(
-            catalog_name=program_data["catalog_name"],
-            catalog_year=program_data["catalog_year"],
-            catalog_archived=program_data["catalog_archived"],
-            program_type=program_data["program_type"],
-            program_name=program_data["program_name"],
-            program_link=program_data["link"],
-            credits=120,
-            requisite=program_requirements,
-        ),
-        completed_course_work=args["completed_coursework"],
-        placements=[
-            Placement(subject=placement["subject"], level=placement["level"])
-            for placement in args["placements"]
-        ],
-        gpa=4.0,
-        level=get_level(args["completed_coursework"]),
-        credits_per_semester=args["credits_per_semester"],
-        start_year=args["start_year"],
-        start_term=args["start_term"],
-    )
-
-    output = main(config)
-    print(json.dumps(output, indent=2))
