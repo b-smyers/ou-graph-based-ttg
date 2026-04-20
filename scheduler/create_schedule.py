@@ -306,6 +306,182 @@ def schedule_remaining_with_ortools(
         return fixed_semesters
 
 
+def get_required_courses(
+    requirements: List[Requirement],
+) -> Tuple[List[Course], List[Requirement]]:
+    required_courses = []
+    remaining_coursework = []
+    for requirement in requirements:
+        match requirement.type:
+            case RequirementType.COURSE:
+                required_courses.append(requirement)
+            case RequirementType.AND:
+                req_courses, rem_courses = get_required_courses(
+                    requirement.requirements
+                )
+                required_courses.extend(req_courses)
+                remaining_coursework.extend(rem_courses)
+            case (
+                RequirementType.OR
+                | RequirementType.CHOOSE_N
+                | RequirementType.CREDITS_FROM
+            ):
+                remaining_coursework.append(requirement)
+            case (
+                RequirementType.NONE
+                | RequirementType.PERMISSION
+                | RequirementType.LEVEL
+                | RequirementType.PLACEMENT
+                | RequirementType.GPA
+                | RequirementType.OTHER
+            ):
+                pass
+            case t:
+                raise ValueError(f"Unknown RequirementType {t}")
+    return required_courses, remaining_coursework
+
+
+def schedule_courses(
+    all_required: Set[str],
+    config: Config,
+) -> List[List[ParsedCourse]]:
+    """
+    Sorts required courses into semesters using raw prerequisite trees,
+    course offering patterns, and credit limits.
+    Returns a list of lists, where each sublist corresponds to a semester
+    in chronological order.
+    """
+
+    # --- Step 0: Remove already completed courses ---
+    completed_set = set(config.completed_course_work)
+    all_required = all_required - completed_set
+
+    # --- Step 1: Build dependency graph (raw prerequisites) ---
+    prereq_map: Dict[str, Set[str]] = {}
+    reverse_map: Dict[str, Set[str]] = {}
+
+    for course in sorted(all_required):
+        course_obj = get_course(course)
+        if not course_obj:
+            logger.error(f"Course {course} not found in DB - skipping")
+            continue
+
+        all_prereq_codes = collect_all_course_codes(course_obj.requisite)
+        prereq_set = {c for c in all_prereq_codes if c in all_required}
+        prereq_map[course] = prereq_set
+
+        for prereq in prereq_set:
+            reverse_map.setdefault(prereq, set()).add(course)
+
+    # --- Step 2: Initialize in-degree, available set, and out-degree (for priority) ---
+    in_degree = {course: len(prereq_map[course]) for course in all_required}
+    available = {c for c in all_required if in_degree[c] == 0}
+    remaining = set(all_required)
+    semesters = []  # will hold lists of courses per semester
+
+    # Precompute out-degree (number of courses that depend on each course)
+    out_degree = {
+        course: len(reverse_map.get(course, set())) for course in all_required
+    }
+
+    # --- Step 3: Simulate semesters with credit limit ---
+    year = config.start_year
+    is_spring = config.start_term == "spring"
+    credit_limit = (
+        config.credits_per_semester - 3
+    )  # -3 so we dont overload with program courses first (balance with bricks)
+
+    while remaining:
+        # Determine which available courses are offered this semester
+        offered_now = []
+        for course in available:
+            course_obj = get_course(course)
+            if course_obj and pattern_allows(course_obj.pattern, is_spring, year):
+                offered_now.append(course)
+
+        if not offered_now:
+            # No courses offered – just advance time
+            logger.debug(
+                f"Semester {year} {'Spring' if is_spring else 'Fall'}: no courses offered"
+            )
+        else:
+            # Greedy selection: pick courses with highest out-degree first,
+            # then smallest credits to fit more.
+            # Build list of (course, credits, out_degree)
+            candidates = []
+            for course in offered_now:
+                course_obj = get_course(course)
+                if course_obj:
+                    credits = course_obj.min_credits
+                    candidates.append((course, credits, out_degree.get(course, 0)))
+
+            # Sort: higher out-degree first, then lower credits (to pack more)
+            candidates.sort(key=lambda x: (-x[2], x[1]))
+
+            selected = []
+            remaining_credits = credit_limit
+            for course, credits, _ in candidates:
+                if credits <= remaining_credits:
+                    selected.append(course)
+                    remaining_credits -= credits
+                else:
+                    # This course alone exceeds remaining capacity; skip it for now.
+                    # It will remain in available for future semesters.
+                    pass
+
+            if not selected:
+                # No course could fit – this indicates a single course exceeds the limit.
+                # Raise an error because it's impossible to schedule under this limit.
+                max_credit_course = max(candidates, key=lambda x: x[1])
+                raise RuntimeError(
+                    f"Course {max_credit_course[0]} requires {max_credit_course[1]} credits, "
+                    f"which exceeds the per‑semester limit of {credit_limit}. "
+                    "Cannot schedule required courses."
+                )
+
+            # Schedule the selected courses this semester
+            semesters.append(selected)
+
+            # Remove them from available and remaining, update dependents
+            for course in selected:
+                available.remove(course)
+                remaining.remove(course)
+
+                for dependent in reverse_map.get(course, []):
+                    in_degree[dependent] -= 1
+                    if in_degree[dependent] == 0:
+                        available.add(dependent)
+
+        # Safety check: if available is empty but courses remain, something is wrong
+        if not available and remaining:
+            raise RuntimeError(
+                f"No courses available to take, but {len(remaining)} courses remain unscheduled. "
+                "Possible cycle or missing prerequisite."
+            )
+
+        # Advance to next semester
+        if is_spring:
+            is_spring = False
+            # year stays same (Fall of same calendar year)
+        else:
+            is_spring = True
+            year += 1
+
+    # --- Step 4: Convert course codes to course objects for final output ---
+    final_semesters = []
+    for sem in semesters:
+        sem_courses = []
+        for code in sem:
+            course_obj = get_course(code)
+            if course_obj:
+                sem_courses.append(course_obj)
+            else:
+                logger.error(f"Course {code} not found in DB during final assembly")
+        final_semesters.append(sem_courses)
+
+    return final_semesters
+
+
 def create_schedule(config: Config):
     bricks = initialize_bricks()
 
@@ -314,184 +490,10 @@ def create_schedule(config: Config):
 
     # We want to end up with all the required courses ordered by requirements
     # Reduce into list of required courses and remaining choice course coursework
-    def get_required_courses(
-        requirements: List[Requirement],
-    ) -> Tuple[List[Course], List[Requirement]]:
-        required_courses = []
-        remaining_coursework = []
-        for requirement in requirements:
-            match requirement.type:
-                case RequirementType.COURSE:
-                    required_courses.append(requirement)
-                case RequirementType.AND:
-                    req_courses, rem_courses = get_required_courses(
-                        requirement.requirements
-                    )
-                    required_courses.extend(req_courses)
-                    remaining_coursework.extend(rem_courses)
-                case (
-                    RequirementType.OR
-                    | RequirementType.CHOOSE_N
-                    | RequirementType.CREDITS_FROM
-                ):
-                    remaining_coursework.append(requirement)
-                case (
-                    RequirementType.NONE
-                    | RequirementType.PERMISSION
-                    | RequirementType.LEVEL
-                    | RequirementType.PLACEMENT
-                    | RequirementType.GPA
-                    | RequirementType.OTHER
-                ):
-                    pass
-                case t:
-                    raise ValueError(f"Unknown RequirementType {t}")
-        return required_courses, remaining_coursework
 
     required_courses, remaining_coursework = get_required_courses(
         config.program.requisite
     )
-    print("Required courses:", [course.course for course in required_courses])
-
-    def schedule_courses(
-        all_required: Set[str],
-        config: Config,
-    ) -> List[List[ParsedCourse]]:
-        """
-        Sorts required courses into semesters using raw prerequisite trees,
-        course offering patterns, and credit limits.
-        Returns a list of lists, where each sublist corresponds to a semester
-        in chronological order.
-        """
-
-        # --- Step 0: Remove already completed courses ---
-        completed_set = set(config.completed_course_work)
-        all_required = all_required - completed_set
-
-        # --- Step 1: Build dependency graph (raw prerequisites) ---
-        prereq_map: Dict[str, Set[str]] = {}
-        reverse_map: Dict[str, Set[str]] = {}
-
-        for course in sorted(all_required):
-            course_obj = get_course(course)
-            if not course_obj:
-                logger.error(f"Course {course} not found in DB - skipping")
-                continue
-
-            all_prereq_codes = collect_all_course_codes(course_obj.requisite)
-            prereq_set = {c for c in all_prereq_codes if c in all_required}
-            prereq_map[course] = prereq_set
-
-            for prereq in prereq_set:
-                reverse_map.setdefault(prereq, set()).add(course)
-
-        # --- Step 2: Initialize in-degree, available set, and out-degree (for priority) ---
-        in_degree = {course: len(prereq_map[course]) for course in all_required}
-        available = {c for c in all_required if in_degree[c] == 0}
-        remaining = set(all_required)
-        semesters = []  # will hold lists of courses per semester
-
-        # Precompute out-degree (number of courses that depend on each course)
-        out_degree = {
-            course: len(reverse_map.get(course, set())) for course in all_required
-        }
-
-        # --- Step 3: Simulate semesters with credit limit ---
-        year = config.start_year
-        is_spring = config.start_term == "spring"
-        credit_limit = (
-            config.credits_per_semester - 3
-        )  # -3 so we dont overload with program courses first (balance with bricks)
-
-        while remaining:
-            # Determine which available courses are offered this semester
-            offered_now = []
-            for course in available:
-                course_obj = get_course(course)
-                if course_obj and pattern_allows(course_obj.pattern, is_spring, year):
-                    offered_now.append(course)
-
-            if not offered_now:
-                # No courses offered – just advance time
-                logger.debug(
-                    f"Semester {year} {'Spring' if is_spring else 'Fall'}: no courses offered"
-                )
-            else:
-                # Greedy selection: pick courses with highest out-degree first,
-                # then smallest credits to fit more.
-                # Build list of (course, credits, out_degree)
-                candidates = []
-                for course in offered_now:
-                    course_obj = get_course(course)
-                    if course_obj:
-                        credits = course_obj.min_credits
-                        candidates.append((course, credits, out_degree.get(course, 0)))
-
-                # Sort: higher out-degree first, then lower credits (to pack more)
-                candidates.sort(key=lambda x: (-x[2], x[1]))
-
-                selected = []
-                remaining_credits = credit_limit
-                for course, credits, _ in candidates:
-                    if credits <= remaining_credits:
-                        selected.append(course)
-                        remaining_credits -= credits
-                    else:
-                        # This course alone exceeds remaining capacity; skip it for now.
-                        # It will remain in available for future semesters.
-                        pass
-
-                if not selected:
-                    # No course could fit – this indicates a single course exceeds the limit.
-                    # Raise an error because it's impossible to schedule under this limit.
-                    max_credit_course = max(candidates, key=lambda x: x[1])
-                    raise RuntimeError(
-                        f"Course {max_credit_course[0]} requires {max_credit_course[1]} credits, "
-                        f"which exceeds the per‑semester limit of {credit_limit}. "
-                        "Cannot schedule required courses."
-                    )
-
-                # Schedule the selected courses this semester
-                semesters.append(selected)
-
-                # Remove them from available and remaining, update dependents
-                for course in selected:
-                    available.remove(course)
-                    remaining.remove(course)
-
-                    for dependent in reverse_map.get(course, []):
-                        in_degree[dependent] -= 1
-                        if in_degree[dependent] == 0:
-                            available.add(dependent)
-
-            # Safety check: if available is empty but courses remain, something is wrong
-            if not available and remaining:
-                raise RuntimeError(
-                    f"No courses available to take, but {len(remaining)} courses remain unscheduled. "
-                    "Possible cycle or missing prerequisite."
-                )
-
-            # Advance to next semester
-            if is_spring:
-                is_spring = False
-                # year stays same (Fall of same calendar year)
-            else:
-                is_spring = True
-                year += 1
-
-        # --- Step 4: Convert course codes to course objects for final output ---
-        final_semesters = []
-        for sem in semesters:
-            sem_courses = []
-            for code in sem:
-                course_obj = get_course(code)
-                if course_obj:
-                    sem_courses.append(course_obj)
-                else:
-                    logger.error(f"Course {code} not found in DB during final assembly")
-            final_semesters.append(sem_courses)
-
-        return final_semesters
 
     # Simplify requirement tree of remaining coursework by removing-
     # courses already satisified by subrequirement courses
@@ -538,11 +540,6 @@ def create_schedule(config: Config):
             print(
                 f"Found {len(new_courses)} new prerequisite courses: {sorted(new_courses)}"
             )
-        else:
-            print("No new prerequisites found.")
-
-    print("\n=== Final set of all required courses ===")
-    print(sorted(all_required.difference(initial_courses)))
 
     # Schedule the required courses into semesters
     semesters = schedule_courses(

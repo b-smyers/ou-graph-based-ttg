@@ -104,22 +104,26 @@ def _log(level: LoggerSeverity, message: str) -> None:
             print(log_message)
 
 
+def _format_message(*args) -> str:
+    return " ".join(str(arg) for arg in args)
+
+
 class Logger:
     @staticmethod
-    def info(message: str) -> None:
-        _log("info", message)
+    def info(*args) -> None:
+        _log("info", _format_message(*args))
 
     @staticmethod
-    def warn(message: str) -> None:
-        _log("warn", message)
+    def warn(*args) -> None:
+        _log("warn", _format_message(*args))
 
     @staticmethod
-    def error(message: str) -> None:
-        _log("error", message)
+    def error(*args) -> None:
+        _log("error", _format_message(*args))
 
     @staticmethod
-    def debug(message: str) -> None:
-        _log("debug", message)
+    def debug(*args) -> None:
+        _log("debug", _format_message(*args))
 
 
 logger = Logger()
